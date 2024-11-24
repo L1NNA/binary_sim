@@ -1,0 +1,8 @@
+transformers==4.39.3
+optimum[exporters,onnxruntime]==1.19.0
+accelerate==0.34.2
+torchsummary
+peft
+scikit-learn
+einops
+varname

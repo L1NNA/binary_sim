@@ -3,3 +3,8 @@ libraries/
 model_checkpoints/
 results/
 datasets/
+**/*.ipynb_checkpoints
+__pycache__
+tokenizers/
+data_gen/
+
