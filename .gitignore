@@ -8,3 +8,4 @@ __pycache__
 tokenizers/
 data_gen/
 
+test.ipynb
