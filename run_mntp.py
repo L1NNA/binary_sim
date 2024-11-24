@@ -1,7 +1,7 @@
+import os
 import argparse
-from typing import Optional, Any, Tuple, List
-from datetime import datetime
 from os.path import join
+from typing import Optional, Any, Tuple, List
 
 import numpy as np
 import torch
@@ -74,13 +74,14 @@ if __name__ == "__main__":
     parser.add_argument("--note", type=str, default='',help="additonal note")
 
     # data_loader
-    parser.add_argument('--data_path', type=str, help='dataset path')
+    parser.add_argument('--data_path', type=str, default='train', help='dataset path')
+    parser.add_argument("--test_data_path", type=str, default='test_o0')
     parser.add_argument("--max_seq_len", type=int, default=512,
         help="max number of tokens")
 
     # training configurations
     parser.add_argument("--batch_size", type=int, default=4)
-    parser.add_argument("--test_batch_size", type=int, default=16)
+    parser.add_argument("--test_batch_size", type=int, default=4)
     parser.add_argument("--resume", action='store_true', help="whether to resume training")
     parser.add_argument('--epochs', type=int, default=5, help='train epochs')
     parser.add_argument('--lr', type=float, default=0.00001, help='optimizer learning rate')
@@ -108,8 +109,8 @@ if __name__ == "__main__":
         tokenizer=tokenizer,
         mlm_probability=args.mlm_probability,
     )
-    dataset = load_mntp_dataset(tokenizer, args.max_seq_len, 'train')
-    val_dataset = load_mntp_dataset(tokenizer, args.max_seq_len, 'test_o0')
+    dataset = load_mntp_dataset(tokenizer, args.max_seq_len, args.data_path)
+    val_dataset = load_mntp_dataset(tokenizer, args.max_seq_len, args.test_data_path)
 
     ########## Training ##########
     # Define the training arguments
@@ -128,7 +129,9 @@ if __name__ == "__main__":
         eval_strategy='epoch',     # Evaluate at the end of each epoch
         save_strategy='epoch',
         load_best_model_at_end=True, # Load the best model when finished training
-        metric_for_best_model=args.metric
+        metric_for_best_model=args.metric,
+        # gradient_accumulation_steps=4,
+        local_rank=int(os.environ.get("LOCAL_RANK", -1)),
     )
 
     # Define the Trainer
@@ -136,6 +139,7 @@ if __name__ == "__main__":
         model=model,
         args=training_args,
         train_dataset=dataset,
+        eval_dataset=val_dataset,
         data_collator=data_collator,
     )
 
