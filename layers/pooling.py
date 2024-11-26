@@ -18,6 +18,15 @@ def causal_pooling(output):
     # b x s x d -> b x d
     return output[:, -1, :]
 
+def attention_mask_pooling(last_hidden_states, attention_mask):
+    left_padding = (attention_mask[:, -1].sum() == attention_mask.shape[0])
+    if left_padding:
+        return last_hidden_states[:, -1]
+    else:
+        sequence_lengths = attention_mask.sum(dim=1) - 1
+        batch_size = last_hidden_states.shape[0]
+        return last_hidden_states[torch.arange(batch_size, device=last_hidden_states.device), sequence_lengths]
+
 def any_max_pooling(output):
     """
     A special pooling technique for binary classification

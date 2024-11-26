@@ -93,3 +93,10 @@ class Qwen2BiForMNTP(Qwen2ForCausalLM):
 
         # Initialize weights and apply final processing
         self.post_init()
+
+from models.base_embedding_model import BaseModelForEmbedding
+
+class Qwen2LLM2Vec(BaseModelForEmbedding):
+
+    def get_model(self):
+        return Qwen2BiModel(self.config)

@@ -19,9 +19,9 @@ from torch.utils.data import Dataset, DataLoader, random_split
 from sklearn.metrics import f1_score, recall_score, precision_score
 
 from models.coe_cos_sim import CoECosSim
-from models.codet5p_embedding import CodeT5PEmbeddingModel
+from models.codet5p_models import CodeT5PEmbeddingModel
 from data_loaders.pos_neg_bin_sim_dataset import BinSimDataset, pairwise_collate
-from data_loaders.pos_bin_sim_dataset import PosBinSimDataset
+from data_loaders.sim_cse import SimCSEDataset
 from data_loaders.test_retrieval_dataset import RetrievalDataset
 
 from utils import compute_metrics
@@ -115,7 +115,7 @@ if __name__ == "__main__":
         del backbone.shared
 
     ########## Load Data ##########
-    dataset = PosBinSimDataset('train', args.max_lines, args.max_pairs)
+    dataset = SimCSEDataset('train', args.max_lines, args.max_pairs)
     total_length = len(dataset)
     train_length = int(total_length * 0.9)
     val_length = total_length - train_length

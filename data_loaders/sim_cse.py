@@ -1,16 +1,14 @@
+import json
+import random
+from collections import defaultdict
+
 from torch.utils.data import Dataset
 from tqdm import tqdm, trange
-import json
-import torch
-from collections import defaultdict
-from dataclasses import dataclass
-from typing import List
-import random
 
-from utils import get_tokens, BinFunc
+from utils import BinFunc
 
 
-class PosBinSimDataset(Dataset):
+class SimCSEDataset(Dataset):
 
     def __init__(self, stage:str='train', max_lines=0, max_num=10000):
         self.max_lines = max_lines
@@ -40,7 +38,6 @@ class PosBinSimDataset(Dataset):
                 keys.remove(key)
             if len(keys) == 0:
                 break
-            
 
     def __len__(self):
         return len(self.indices)

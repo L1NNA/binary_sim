@@ -81,55 +81,6 @@ def initialize_peft(
     model.print_trainable_parameters()
     return model
 
-
-def calculate_mrr(scores:np.ndarray, relevance:np.ndarray):
-    """
-    Calculate the Mean Reciprocal Rank (MRR) for a batch of data where each row contains relevance scores.
-    
-    Args:
-    scores (np.ndarray): An array of shape (query_batch, values_batch) where the relevant item for each query is at the diagonal position (i, i).
-    relevance (np.ndarray): skip ith element if the ith masking is zero.
-    
-    Returns:
-    float: The Mean Reciprocal Rank (MRR).
-    """
-    query_batch = scores.shape[0]
-    
-    # Initialize a list to store ranks
-    ranks = []
-
-    for i in range(query_batch):
-            
-        # Get the relevance scores for the i-th row
-        relevance_scores = scores[i]
-        relevant_score = relevance_scores[relevance[i]]
-        
-        # Calculate the rank of the relevant score within the row
-        rank = (relevance_scores > relevant_score).sum().item() + 1
-        
-        # Append the rank to the list
-        ranks.append(rank)
-    
-    # Convert ranks to an array
-    ranks = np.array(ranks)
-    
-    # Calculate the reciprocal ranks
-    reciprocal_ranks = 1 / ranks
-    
-    # Compute the Mean Reciprocal Rank (MRR)
-    mrr = reciprocal_ranks.mean()
-    
-    return float(mrr)
-
-
-def find_common_elements(*lists):
-    lists = lists[0]
-    # Find intersection of all lists
-    common_elements = set(lists[0])
-    for lst in lists[1:]:
-        common_elements &= set(lst)
-    return list(common_elements)
-
 def preserve_middle_section(original_list, max_length):
     length = len(original_list)
     middle = length / 2
@@ -140,54 +91,6 @@ def preserve_middle_section(original_list, max_length):
         start = int(middle - (max_length // 2))
         end = int(middle + (max_length // 2) + 1)
     return original_list[start:end]
-
-
-def recall_at_k(scores: np.ndarray, relevance:np.ndarray, k: int) -> float:
-    """
-    Compute the recall@k for a scores matrix.
-    
-    Parameters:
-    - scores: np.ndarray of shape (query_batch_size, values_batch_size)
-    - relevance: np.ndarray of shape (query_batch_size)
-    - k: int, the number of top items to consider
-    
-    Returns:
-    - float, the average recall@k
-    """
-    # Get the batch size
-    query_batch = scores.shape[0]
-    
-    # Get the indices of the top-k scores for each query
-    top_k_indices = np.argsort(-scores, axis=1)[:, :k]
-    
-    # Initialize the recall@k counter
-    recall_at_k_count = 0
-    
-    # Check if the relevant item (diagonal element) is among the top-k items
-    for i in range(query_batch):
-        if relevance[i] in top_k_indices[i]:
-            recall_at_k_count += 1
-    
-    # Compute the average recall@k
-    recall_at_k = recall_at_k_count / query_batch
-    
-    return recall_at_k
-
-
-def compute_retrieval_metrics(scores, relevance):
-    pool_size = scores.shape[1]
-    if relevance is None:
-        relevance = np.arange(scores.shape[0])
-    mrr = calculate_mrr(scores, relevance)
-    recall_at_1 = recall_at_k(scores, relevance, 1)
-    recall_at_10 = recall_at_k(scores, relevance, 10)
-    return {
-        'mrr':mrr,
-        'recall_at_1':recall_at_1,
-        'recall_at_10':recall_at_10,
-        'pool_size': pool_size
-    }
-
 
 def get_tokens(batches, tokenizer, max_blocks, max_length):
     b = len(batches)

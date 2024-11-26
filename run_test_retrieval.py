@@ -1,10 +1,11 @@
 import json
 import argparse
 from datetime import datetime
-from os.path import join
+from os.path import join, exists
 import os
 import random
-os.environ['CUDA_VISIBLE_DEVICES'] = '0,1,4,5'
+import pickle
+import itertools
 
 import numpy as np
 from tqdm import tqdm, trange
@@ -13,223 +14,191 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 from transformers import AutoTokenizer, AutoModel
-from transformers import TrainingArguments, Trainer, TrainerCallback
-from torch.utils.data import Dataset, DataLoader, random_split
 
-from models.coe_cos_sim import CoECosSim
-from models.embedding_model import QwenEmbeddingModel
-from models.prefix_sft import PrefixSFT, Sanity
-# from data_loaders.pos_neg_bin_sim_dataset import BinSimDataset, line_collate
 from data_loaders.test_retrieval_dataset import RetrievalDataset
-from utils import find_common_elements, calculate_mrr, compute_retrieval_metrics, get_tokens
-from utils.retrieval_utils import get_embeddings
-from peft import get_peft_config, get_peft_model, get_peft_model_state_dict, PrefixTuningConfig, TaskType, LoraConfig
-from safetensors.torch import load_file
-from models.llm2vec import Qwen2BiForMNTP
+from utils.retrieval_utils import find_common_elements, get_detailed_instruct, test_retrieval
+from models.llm2vec import Qwen2BiForMNTP, Qwen2LLM2Vec
+from utils import get_tokens
+from models.qwen_models import Qwen2Model
+from models.codet5p_models import CodeT5PEmbeddingModel
+from models.bert_models import GraphCodeBERTEmbedding
 
 models = {
-    'qwen_emb': 'Alibaba-NLP/gte-Qwen2-1.5B-instruct',
-    'codet5p-110m-embedding': 'Salesforce/codet5p-110m-embedding',
-    'codet5p-220m': "Salesforce/codet5p-220m",
-    'codet5p-770m': "Salesforce/codet5p-770m",
-    'jina_emb': 'jinaai/jina-embeddings-v2-base-code',
-    'qwen_llm2vec': 'Qwen/Qwen2.5-Coder-0.5B-Instruct'
+    'qwen_emb': ('Alibaba-NLP/gte-Qwen2-1.5B-instruct', Qwen2Model),
+    'codet5p-110m-embedding': ('Salesforce/codet5p-110m-embedding', CodeT5PEmbeddingModel),
+    'jina_emb': ('jinaai/jina-embeddings-v2-base-code', AutoModel),
+    'codebert': ('microsoft/codebert-base', GraphCodeBERTEmbedding),
+    'qwen_llm2vec': ('Qwen/Qwen2.5-Coder-0.5B-Instruct', Qwen2LLM2Vec),
+    'qwen_sft': ('Qwen/Qwen2.5-Coder-0.5B-Instruct', None)
 }
+
+def load_data(data_path, source, target, pool_size, max_lines):
+    source_path = join(data_path, f'test_{source}.jsonl')
+    target_path = join(data_path, f'test_{target}.jsonl')
+    source_dataset = RetrievalDataset(source_path, keys=None)
+    target_dataset = RetrievalDataset(target_path, keys=None)
+
+    cache_file = join(data_path, 'samples', f'{source}_to_{target}_{pool_size}.pt')
+    # load pairs, the sampled pairs should be fixed across all baseline and models
+    if exists(cache_file):
+        with open(cache_file, 'rb') as f:
+            sampled_keys = pickle.load(f)
+    else:
+        source_keys = list(source_dataset.bins['function'])
+        target_keys = list(target_dataset.bins['function'])
+        common_keys = find_common_elements([source_keys, target_keys])
+        assert len(common_keys) >= pool_size, "pool size too large, not enough functions with this setup"
+        sampled_keys = random.sample(common_keys, pool_size)
+        with open(cache_file, 'wb') as f:
+            pickle.dump(sampled_keys, f)
+
+    source_funcs = source_dataset.get_all(keys=sampled_keys, join_blocks=(max_lines==0))
+    target_funcs = target_dataset.get_all(keys=sampled_keys, join_blocks=(max_lines==0))
+    return source_funcs, target_funcs
+
+def get_embeddings(
+    model, tokenizer,
+    data_path, source, target, pool_size, max_length, max_blocks = 0,
+    test_batch_size = 32,
+    query_instruction = None,
+    value_instruction = None,
+    device = 'cuda:0'
+):
+    queries, values = load_data(data_path, source, target, pool_size, max_blocks)
+
+    queries = [get_detailed_instruct(query_instruction, query) for query in queries]
+    values = [get_detailed_instruct(value_instruction, value) for value in values]
+    
+    query_embs = []
+    value_embs = []
+    for i in trange(0, len(queries), test_batch_size, desc="Embedding queries"):
+        with torch.no_grad():
+            batch_dict = get_tokens(queries[i:i+test_batch_size], tokenizer, max_blocks, max_length).to(device)
+            query_outputs = model(**batch_dict)['preds'].cpu()
+            query_embs.append(query_outputs)
+    query_embs = torch.cat(query_embs, dim=0).view(-1, query_outputs.size(-1))
+
+    for i in trange(0, len(values), test_batch_size, desc="Embedding values"):
+        with torch.no_grad():
+            batch_dict = get_tokens(values[i:i+test_batch_size], tokenizer, max_blocks, max_length).to(device)
+            value_outputs = model(**batch_dict)['preds'].cpu()
+            value_embs.append(value_outputs)
+    value_embs = torch.cat(value_embs, dim=0).view(-1, value_outputs.size(-1))
+
+    metrics = test_retrieval(query_embs, value_embs)
+    return metrics
 
 if __name__ == "__main__":
     # Create the parser
     parser = argparse.ArgumentParser()
 
-    # Add the arguments
+    # === model ===
+    parser.add_argument("--model", choices=models.keys(), default='jina_emb', help="The model name")
+    parser.add_argument("--local_model_path", type=str,)
+    parser.add_argument("--local_tokenizer_path", type=str)
     parser.add_argument(
-        "--batch_size", type=int, default=32,
-        help="The batch size."
+        # "--sft", type=str, default='lora',
+        "--sft_model", type=str, default=None,
+        help="whether to use sft model or pre-trained model"
     )
+
+    # === data ===
     parser.add_argument(
         "--test_batch_size", type=int, default=32,
         help="The batch size."
     )
     parser.add_argument(
-        "--model", choices=models.keys(), default='jina_emb',
-        help="The model name"
-    )
-    parser.add_argument(
-        "--max_lines", type=int, default=0,
-        help="max lines"
+        "--max_blocks", type=int, default=0,
+        help="max number of blocks"
     )
     parser.add_argument(
         "--max_length", type=int, default=1024,
         help="max number of tokens per line"
     )
     parser.add_argument(
-        "--source_dataset", type=str, default='o0',
-        help="source dataset for retrieval"
-    )
-    parser.add_argument(
-        "--target_dataset", type=str, default='o2',
-        help="target dataset for retrieval"
-    )
-    parser.add_argument(
         "--pool_size", type=int, default=1000,
         help="pool size for retrieval"
     )
     parser.add_argument(
-        # "--sft", type=str, default='lora',
-        "--sft", type=str, default=None,
-        help="whether to use sft model or pre-trained model"
+        "--data_path", type=str, default=join(os.getcwd(), 'datasets'),
+        help="path to the datasets"
     )
     # Parse the arguments
     args = parser.parse_args()
     
+
+    # ================= Load Model ======================
+    model_path, model_cls, get_embedding_func = models[args.model]
+    model = AutoModel.from_pretrained(
+        model_path if args.local_model_path is None else args.local_model_path,
+        torch_dtype=torch.bfloat16
+    )
+    tokenizer = AutoTokenizer.from_pretrained(
+        model_path if args.local_tokenizer_path is None else args.local_tokenizer_path,
+        trust_remote_code=True,
+        padding_side='left'
+    )
+
+    def get_output(input_ids, attention_mask):
+        # TODO need pooling
+        return get_embedding_func(model, input_ids, attention_mask)
     
-    ## Results folder based on vanilla model or 
-    if args.sft is not None:
-        source_embs_path = f'./results/{args.sft}_{args.model}_{args.source_dataset}_{args.max_length}_{args.pool_size}.jsonl'
-        target_embs_path = f'./results/{args.sft}_{args.model}_{args.target_dataset}_{args.max_length}_{args.pool_size}.jsonl'
-    else:
-        source_embs_path = f'./results/baseline_{args.model}_{args.source_dataset}_{args.max_length}_{args.pool_size}.jsonl'
-        target_embs_path = f'./results/baseline_{args.model}_{args.target_dataset}_{args.max_length}_{args.pool_size}.jsonl'
+    # ================= Embedding ======================
+    optimizations = ['o0', 'o1', 'o2', 'o3']
+    obfuscations = ['obf_all', 'obf_none', 'obf_sub', 'obf_fla', 'obf_bcf']
+    compilers = ['clang', 'gcc']
+    architectures = ['arm', 'powerpc', 'x86_32', 'x86_64', 'mips']
         
-        
-    if os.path.exists(source_embs_path) and os.path.exists(target_embs_path):
-        query_embs = []
-        value_embs = []
-        sampled_keys = []
-        with open(source_embs_path) as sf:
-            for line in sf:
-                js = json.loads(line)
-                query_embs.append(js['embs'])
-                sampled_keys.append(js['func'])
-        with open(target_embs_path) as tf:
-            for i, line in enumerate(tf):
-                js = json.loads(line)
-                value_embs.append(js['embs'])
-                assert js['func'] == sampled_keys[i]
-                
-        query_embs = torch.tensor(query_embs)
-        value_embs = torch.tensor(value_embs)
-    else:
-        # ================= Load Data ======================
-        ## read in all function keys from source and target
-        path = os.path.join(os.getcwd(), 'datasets')
-        source_path = os.path.join(path, 'test_'+args.source_dataset+'.jsonl')
-        target_path = os.path.join(path, 'test_'+args.target_dataset+'.jsonl')
-        source_dataset = RetrievalDataset(source_path, keys=None)
-        target_dataset = RetrievalDataset(target_path, keys=None)
+    result_file = join('./results/reterival', f'{args.model}_{args.pool_size}.csv')
+    with open(result_file, 'w') as f:
+        f.write('source, dest, mrr, recall@1, recall@10\n')
 
-        # ================= Sample Data ======================
-        ## sample pool_size number of functions that exist in both source and target
-        source_keys = list(source_dataset.bins['function'])
-        target_keys = list(target_dataset.bins['function'])
-        common_keys = find_common_elements([source_keys, target_keys])
-        assert len(common_keys) >= args.pool_size, "pool size too large, not enough functions with this setup"
-        sampled_keys = random.sample(common_keys, args.pool_size) 
-
-        source_funcs = source_dataset.get_all(keys=sampled_keys, join_blocks=(args.max_lines==0))
-        target_funcs = target_dataset.get_all(keys=sampled_keys, join_blocks=(args.max_lines==0))
-
-
-        # ================= Load Backbone ======================
-        if args.model == 'qwen_llm2vec':
-            backbone = Qwen2BiForMNTP.from_pretrained(
-                './model_checkpoints/mntp_codeqwen/checkpoint-7848',
-                torch_dtype='auto',
-            ).to('cuda:0')
-        else:
-            backbone = AutoModel.from_pretrained(
-                models[args.model],
-                torch_dtype=torch.bfloat16,
-                device_map='auto',
-                trust_remote_code=True
-            )
-
-        tokenizer = AutoTokenizer.from_pretrained(
-            models[args.model],
-            trust_remote_code=True,
-            padding_side='left'
+    combinations = itertools.permutations(optimizations, 2)
+    for o1, o2 in combinations:
+        print(f'Testing reterival optimization {o1} to optimization {o2}')
+        metrics = get_embeddings(
+            get_output, tokenizer,
+            args.data_path, o1, o2, args.pool_size, args.max_length, args.max_blocks,
+            args.test_batch_size, f'translate the following binary code in optimization {o1} to optimization {o2}',
         )
-        
-        # ================= Load Custom Lora Model ======================
-        if args.sft is not None:
-            ckp = os.path.join(os.getcwd(), 'model_checkpoints', f'PrefixTuning_{args.model}', 'checkpoint-13334', 'model.safetensors')
-            
-            lora_modules = []
-            for n, m in backbone.named_modules():
-                if type(m) is nn.modules.linear.Linear and 'mlp' in n:
-                    lora_modules.append(n)
+        print(f'Finished testing reterival optimization {o1} to optimization {o2}', metrics)
+        with open(result_file, 'a') as f:
+            f.write(f'{o1}, {o2}, {metrics['mrr']}, {metrics['recall_at_1']}, {metrics['recall_at_10']}\n')
 
-            lora_config = LoraConfig(
-                # target_modules=[r"model.layers.%d.mlp.gate_proj", r"model.layers.%d.mlp.up_proj", r"model.layers.%d.mlp.down_proj"]
-                # target_modules=r'.*\.mlp\.%s_proj'
-                target_modules = lora_modules
-            )
+    combinations = itertools.permutations(obfuscations, 2)
+    for o1, o2 in combinations:
+        print(f'Testing reterival obfuscation {o1} to obfuscation {o2}')
+        metrics = get_embeddings(
+            get_output, tokenizer,
+            args.data_path, o1, o2, args.pool_size, args.max_length, args.max_blocks,
+            args.test_batch_size, f'translate the following binary code obfuscated by {o1} to obfuscation {o2}',
+        )
+        print(f'Finished testing reterival obfuscation {o1} to obfuscation {o2}', metrics)
+        with open(result_file, 'a') as f:
+            f.write(f'{o1}, {o2}, {metrics['mrr']}, {metrics['recall_at_1']}, {metrics['recall_at_10']}\n')
 
-            lora_model = get_peft_model(backbone, lora_config)
-            model = Sanity(lora_model)
-            
-            state_dict = load_file(ckp)
-            model.load_state_dict(state_dict)
-        else:
-            model = backbone
+    combinations = itertools.permutations(compilers, 2)
+    for c1, c2 in combinations:
+        print(f'Testing reterival compiler {c1} to compiler {c2}')
+        metrics = get_embeddings(
+            get_output, tokenizer,
+            args.data_path, c1, c2, args.pool_size, args.max_length, args.max_blocks,
+            args.test_batch_size, f'translate the following binary code compiled by {c1} to compiler {c2}',
+        )
+        print(f'Finished testing reterival compiler {c1} to compiler {c2}', metrics)
+        with open(result_file, 'a') as f:
+            f.write(f'{c1}, {c2}, {metrics['mrr']}, {metrics['recall_at_11']}, {metrics['recall_at_10']}\n')
 
-        # ================= Embedding ======================
-        
-        ## describe prompt for both source and target
-        task_source = f'Given an assembly, retrieve the clone'
-        task_target = f'Given an assembly, retrieve the clone'
-        
-        def get_output(input_ids, attention_mask, sft = False):
-            if sft == True:
-                preds = model(input_ids, attention_mask)
-                preds['preds'] = preds['preds'].float()
-                return preds
-            ### check if [batch, seq_len] or [batch, blocks, seq_len]
-            
-            if args.model == 'qwen_llm2vec':
-                preds = model(input_ids, attention_mask, output_hidden_states=True)
-                return {"preds":preds['hidden_states'][-1][:, -1, :].float()}
-            if input_ids.dim() == 2:
-                preds = model(input_ids, attention_mask)
-                if type(preds) is torch.Tensor:
-                    preds = preds.float()
-                else:
-                    preds = preds.last_hidden_state[:, -1, :].float()
-                return {"preds":preds}
-            else:
-                block_pred = []
-                for i in range(input_ids.size(1)):
-                    block_pred.append(model(input_ids[:, i, :], attention_mask[:, i, :]).last_hidden_state[:, -1, :].float())
-                block_pred = torch.stack(block_pred, dim=0)
-                preds = torch.mean(block_pred, dim=0)
-                return {"preds":preds}
-        query_embs, value_embs = get_embeddings(source_funcs, target_funcs, 
-                                                get_output, 
-                                                tokenizer, args.max_length, 
-                                                test_batch_size=args.test_batch_size,
-                                                max_blocks=args.max_lines,
-                                                task_source=task_source, task_target=task_target,
-                                                sft = True if args.sft is not None else False
-                                                )
-
-        # Cache outputs
-        with open(source_embs_path, 'a') as sf, open(target_embs_path, 'a') as tf:
-            for i in range(len(sampled_keys)):
-                sf.write(json.dumps({'func': sampled_keys[i], 'embs': query_embs[i].numpy().tolist()}) + '\n')
-                tf.write(json.dumps({'func': sampled_keys[i], 'embs': value_embs[i].numpy().tolist()}) + '\n')
-
-    ### compute cosine similarity
-    scores = []
-    for i in query_embs:
-        scores.append(F.cosine_similarity(i.unsqueeze(0), value_embs, dim=1).numpy())
-    scores = np.array(scores)
-    
-    ## this takes too much memory for large pool size like 10k
-    # scores = F.cosine_similarity(query_embs.unsqueeze(1), value_embs.unsqueeze(0), dim=2).numpy()
-    relevance = np.arange(query_embs.size(0))
-    
-    print(compute_retrieval_metrics(scores, relevance))
-    
-    
-    
+    combinations = itertools.permutations(architectures, 2)
+    for a1, a2 in combinations:
+        print(f'Testing reterival architecture {a1} to architecture {a2}')
+        metrics = get_embeddings(
+            get_output, tokenizer,
+            args.data_path, a1, a2, args.pool_size, args.max_length, args.max_blocks,
+            args.test_batch_size, f'translate the following binary code in architecture {a1} to architecture {a2}',
+        )
+        print(f'Finished testing reterival architecture {a1} to architecture {a2}', metrics)
+        with open(result_file, 'a') as f:
+            f.write(f'{a1}, {a2}, {metrics['mrr']}, {metrics['recall_at_1']}, {metrics['recall_at_10']}\n')
     
     

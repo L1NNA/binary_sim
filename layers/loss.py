@@ -2,17 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-def info_nce(x_emb, temperature=0.05):
-    batch_size = x_emb.size(0)
-    labels = torch.arange(batch_size, requires_grad=False) \
-                .to(x_emb.device)
-    # Compute cosine similarities: batch_size x batch_size
-    similarities = F.cosine_similarity(x_emb.unsqueeze(1), \
-        x_emb.unsqueeze(0), dim=2) / temperature
-    logits = similarities - torch.logsumexp(similarities, dim=1, keepdim=True)
-    return F.cross_entropy(logits, labels)
-
-def info_nce_xy(x_emb, y_emb, labels=None, temperature=0.05):
+def info_nce(x_emb, y_emb, labels=None, temperature=0.05):
     batch_size = x_emb.size(0)
     # Compute cross cosine similarities: batch_size x batch_size
     similarities = F.cosine_similarity(x_emb.unsqueeze(1), \
@@ -25,6 +15,10 @@ def info_nce_xy(x_emb, y_emb, labels=None, temperature=0.05):
         logits.masked_fill_(mask, -torch.inf)
     diag_labels = torch.arange(batch_size).to(labels.device)
     return F.cross_entropy(logits, diag_labels)
+
+
+def cosine_similarity(x_emb, y_emb, labels):
+    return F.cosine_embedding_loss(x_emb, y_emb, labels)
 
 
 # def _create_temperatures(labels, logits):
