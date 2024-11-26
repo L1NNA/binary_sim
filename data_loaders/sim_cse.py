@@ -10,8 +10,8 @@ from utils import BinFunc
 
 class SimCSEDataset(Dataset):
 
-    def __init__(self, stage:str='train', max_lines=0, max_num=10000):
-        self.max_lines = max_lines
+    def __init__(self, stage:str='train', max_blocks=0, max_num=10000):
+        self.max_blocks = max_blocks
         self.pairs = []
         
         json_path = f'./datasets/{stage}.jsonl'
@@ -47,4 +47,4 @@ class SimCSEDataset(Dataset):
         x:BinFunc = self.pairs[x_index]
         y:BinFunc = self.pairs[y_index]
         label = self.functions.index(x.function)
-        return x.get_blocks(self.max_lines), y.get_blocks(self.max_lines), label
+        return x.get_blocks(self.max_blocks), y.get_blocks(self.max_blocks), label

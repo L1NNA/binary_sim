@@ -2,6 +2,7 @@ import json
 import argparse
 from datetime import datetime
 from os.path import join
+import os
 
 import numpy as np
 from tqdm import tqdm
@@ -10,7 +11,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 
-from transformers import AutoTokenizer, AutoModel
+from transformers import AutoTokenizer, AutoModel, AutoConfig
 from transformers import TrainingArguments, Trainer
 from torch.utils.data import random_split
 
@@ -69,10 +70,9 @@ if __name__ == "__main__":
     
     # ================= Load Model ======================
     model_path, model_cls = models[args.model]
-    model = AutoModel.from_pretrained(
-        model_path if args.local_model_path is None else args.local_model_path,
-        torch_dtype=torch.bfloat16
-    )
+    config = AutoConfig.from_pretrained(model_path if args.local_model_path is None else args.local_model_path)
+    config.torch_dtype = torch.bfloat16
+    model = model_cls(config)
     tokenizer = AutoTokenizer.from_pretrained(
         model_path if args.local_tokenizer_path is None else args.local_tokenizer_path,
         trust_remote_code=True,
@@ -80,7 +80,7 @@ if __name__ == "__main__":
     )
 
     ########## Load Data ##########
-    dataset = SimCSEDataset('train', args.max_lines, args.max_pairs)
+    dataset = SimCSEDataset('train', args.max_blocks, args.max_pairs)
     total_length = len(dataset)
     train_length = int(total_length * 0.9)
     val_length = total_length - train_length
@@ -102,7 +102,8 @@ if __name__ == "__main__":
         eval_strategy='epoch',     # Evaluate at the end of each epoch
         save_strategy='epoch',
         load_best_model_at_end=True, # Load the best model when finished training
-        metric_for_best_model='loss'
+        metric_for_best_model='loss',
+        local_rank=int(os.environ.get('LOCAL_RANK', -1))
     )
 
     # Define the Trainer

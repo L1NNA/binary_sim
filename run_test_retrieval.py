@@ -128,7 +128,7 @@ if __name__ == "__main__":
     
 
     # ================= Load Model ======================
-    model_path, model_cls, get_embedding_func = models[args.model]
+    model_path, model_cls = models[args.model]
     model = AutoModel.from_pretrained(
         model_path if args.local_model_path is None else args.local_model_path,
         torch_dtype=torch.bfloat16
@@ -138,10 +138,6 @@ if __name__ == "__main__":
         trust_remote_code=True,
         padding_side='left'
     )
-
-    def get_output(input_ids, attention_mask):
-        # TODO need pooling
-        return get_embedding_func(model, input_ids, attention_mask)
     
     # ================= Embedding ======================
     optimizations = ['o0', 'o1', 'o2', 'o3']
@@ -157,48 +153,48 @@ if __name__ == "__main__":
     for o1, o2 in combinations:
         print(f'Testing reterival optimization {o1} to optimization {o2}')
         metrics = get_embeddings(
-            get_output, tokenizer,
+            model, tokenizer,
             args.data_path, o1, o2, args.pool_size, args.max_length, args.max_blocks,
             args.test_batch_size, f'translate the following binary code in optimization {o1} to optimization {o2}',
         )
         print(f'Finished testing reterival optimization {o1} to optimization {o2}', metrics)
         with open(result_file, 'a') as f:
-            f.write(f'{o1}, {o2}, {metrics['mrr']}, {metrics['recall_at_1']}, {metrics['recall_at_10']}\n')
+            f.write(f"{o1}, {o2}, {metrics['mrr']}, {metrics['recall_at_1']}, {metrics['recall_at_10']}\n")
 
     combinations = itertools.permutations(obfuscations, 2)
     for o1, o2 in combinations:
         print(f'Testing reterival obfuscation {o1} to obfuscation {o2}')
         metrics = get_embeddings(
-            get_output, tokenizer,
+            model, tokenizer,
             args.data_path, o1, o2, args.pool_size, args.max_length, args.max_blocks,
             args.test_batch_size, f'translate the following binary code obfuscated by {o1} to obfuscation {o2}',
         )
         print(f'Finished testing reterival obfuscation {o1} to obfuscation {o2}', metrics)
         with open(result_file, 'a') as f:
-            f.write(f'{o1}, {o2}, {metrics['mrr']}, {metrics['recall_at_1']}, {metrics['recall_at_10']}\n')
+            f.write(f"{o1}, {o2}, {metrics['mrr']}, {metrics['recall_at_1']}, {metrics['recall_at_10']}\n")
 
     combinations = itertools.permutations(compilers, 2)
     for c1, c2 in combinations:
         print(f'Testing reterival compiler {c1} to compiler {c2}')
         metrics = get_embeddings(
-            get_output, tokenizer,
+            model, tokenizer,
             args.data_path, c1, c2, args.pool_size, args.max_length, args.max_blocks,
             args.test_batch_size, f'translate the following binary code compiled by {c1} to compiler {c2}',
         )
         print(f'Finished testing reterival compiler {c1} to compiler {c2}', metrics)
         with open(result_file, 'a') as f:
-            f.write(f'{c1}, {c2}, {metrics['mrr']}, {metrics['recall_at_11']}, {metrics['recall_at_10']}\n')
+            f.write(f"{c1}, {c2}, {metrics['mrr']}, {metrics['recall_at_11']}, {metrics['recall_at_10']}\n")
 
     combinations = itertools.permutations(architectures, 2)
     for a1, a2 in combinations:
         print(f'Testing reterival architecture {a1} to architecture {a2}')
         metrics = get_embeddings(
-            get_output, tokenizer,
+            model, tokenizer,
             args.data_path, a1, a2, args.pool_size, args.max_length, args.max_blocks,
             args.test_batch_size, f'translate the following binary code in architecture {a1} to architecture {a2}',
         )
         print(f'Finished testing reterival architecture {a1} to architecture {a2}', metrics)
         with open(result_file, 'a') as f:
-            f.write(f'{a1}, {a2}, {metrics['mrr']}, {metrics['recall_at_1']}, {metrics['recall_at_10']}\n')
+            f.write(f"{a1}, {a2}, {metrics['mrr']}, {metrics['recall_at_1']}, {metrics['recall_at_10']}\n")
     
     

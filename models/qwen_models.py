@@ -10,11 +10,13 @@ from models.base_embedding_model import BaseModelForEmbedding
 
 class Qwen2Model(BaseModelForEmbedding):
     
+    config_class = Qwen2Config
+    
     def __init__(self, config:Qwen2Config):
         super(Qwen2Model, self).__init__(config)
 
     def get_model(self):
-        return Qwen2Model(self.config)
+        return Qwen2Model.from_pretrained(config.name_or_path, config)
     
     @classmethod
     def from_causal_lm(cls, causalLM:Qwen2ForCausalLM):
