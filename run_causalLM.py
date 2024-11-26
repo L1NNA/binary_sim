@@ -122,10 +122,10 @@ if __name__ == "__main__":
     
     model = backbone.to(device)
     
-    ckp = os.path.join(os.getcwd(), 'model_checkpoints', f'causal_{args.model}', 'checkpoint-8672', 'model.safetensors')
-    state_dict = load_file(ckp)
-    state_dict['lm_head.weight'] = state_dict['model.embed_tokens.weight']
-    model.load_state_dict(state_dict)
+    # ckp = os.path.join(os.getcwd(), 'model_checkpoints', f'causal_{args.model}', 'checkpoint-8672', 'model.safetensors')
+    # state_dict = load_file(ckp)
+    # state_dict['lm_head.weight'] = state_dict['model.embed_tokens.weight']
+    # model.load_state_dict(state_dict)
     
     # lora_modules = []
     # for n, m in backbone.named_modules():

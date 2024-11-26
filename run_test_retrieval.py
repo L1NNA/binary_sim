@@ -4,6 +4,7 @@ from datetime import datetime
 from os.path import join
 import os
 import random
+os.environ['CUDA_VISIBLE_DEVICES'] = '0,1,4,5'
 
 import numpy as np
 from tqdm import tqdm, trange
@@ -21,16 +22,18 @@ from models.prefix_sft import PrefixSFT, Sanity
 # from data_loaders.pos_neg_bin_sim_dataset import BinSimDataset, line_collate
 from data_loaders.test_retrieval_dataset import RetrievalDataset
 from utils import find_common_elements, calculate_mrr, compute_retrieval_metrics, get_tokens
-from evaluation.retrieval_utils import get_embeddings
+from utils.retrieval_utils import get_embeddings
 from peft import get_peft_config, get_peft_model, get_peft_model_state_dict, PrefixTuningConfig, TaskType, LoraConfig
 from safetensors.torch import load_file
+from models.llm2vec import Qwen2BiForMNTP
 
 models = {
     'qwen_emb': 'Alibaba-NLP/gte-Qwen2-1.5B-instruct',
     'codet5p-110m-embedding': 'Salesforce/codet5p-110m-embedding',
     'codet5p-220m': "Salesforce/codet5p-220m",
     'codet5p-770m': "Salesforce/codet5p-770m",
-    'jina_emb': 'jinaai/jina-embeddings-v2-base-code'
+    'jina_emb': 'jinaai/jina-embeddings-v2-base-code',
+    'qwen_llm2vec': 'Qwen/Qwen2.5-Coder-0.5B-Instruct'
 }
 
 if __name__ == "__main__":
@@ -59,20 +62,20 @@ if __name__ == "__main__":
         help="max number of tokens per line"
     )
     parser.add_argument(
-        "--source_dataset", type=str, default='BinaryCorp_O0',
+        "--source_dataset", type=str, default='o0',
         help="source dataset for retrieval"
     )
     parser.add_argument(
-        "--target_dataset", type=str, default='BinaryCorp_O3',
+        "--target_dataset", type=str, default='o2',
         help="target dataset for retrieval"
     )
     parser.add_argument(
-        "--pool_size", type=int, default=10000,
+        "--pool_size", type=int, default=1000,
         help="pool size for retrieval"
     )
     parser.add_argument(
-        "--sft", type=str, default='lora',
-        # "--sft", type=str, default=None,
+        # "--sft", type=str, default='lora',
+        "--sft", type=str, default=None,
         help="whether to use sft model or pre-trained model"
     )
     # Parse the arguments
@@ -116,23 +119,29 @@ if __name__ == "__main__":
 
         # ================= Sample Data ======================
         ## sample pool_size number of functions that exist in both source and target
-        source_keys = list(source_dataset.bins.keys())
-        target_keys = list(target_dataset.bins.keys())
+        source_keys = list(source_dataset.bins['function'])
+        target_keys = list(target_dataset.bins['function'])
         common_keys = find_common_elements([source_keys, target_keys])
         assert len(common_keys) >= args.pool_size, "pool size too large, not enough functions with this setup"
         sampled_keys = random.sample(common_keys, args.pool_size) 
 
-        source_funcs = source_dataset.get_all(keys=sampled_keys, args.max_lines==0)
-        target_funcs = target_dataset.get_all(keys=sampled_keys, args.max_lines==0)
+        source_funcs = source_dataset.get_all(keys=sampled_keys, join_blocks=(args.max_lines==0))
+        target_funcs = target_dataset.get_all(keys=sampled_keys, join_blocks=(args.max_lines==0))
 
 
         # ================= Load Backbone ======================
-        backbone = AutoModel.from_pretrained(
-            models[args.model],
-            torch_dtype=torch.bfloat16,
-            device_map='auto',
-            trust_remote_code=True
-        )
+        if args.model == 'qwen_llm2vec':
+            backbone = Qwen2BiForMNTP.from_pretrained(
+                './model_checkpoints/mntp_codeqwen/checkpoint-7848',
+                torch_dtype='auto',
+            ).to('cuda:0')
+        else:
+            backbone = AutoModel.from_pretrained(
+                models[args.model],
+                torch_dtype=torch.bfloat16,
+                device_map='auto',
+                trust_remote_code=True
+            )
 
         tokenizer = AutoTokenizer.from_pretrained(
             models[args.model],
@@ -175,6 +184,10 @@ if __name__ == "__main__":
                 preds['preds'] = preds['preds'].float()
                 return preds
             ### check if [batch, seq_len] or [batch, blocks, seq_len]
+            
+            if args.model == 'qwen_llm2vec':
+                preds = model(input_ids, attention_mask, output_hidden_states=True)
+                return {"preds":preds['hidden_states'][-1][:, -1, :].float()}
             if input_ids.dim() == 2:
                 preds = model(input_ids, attention_mask)
                 if type(preds) is torch.Tensor:

@@ -53,6 +53,7 @@ class CustomConfig(PretrainedConfig):
         gamma_init = 1.0,
         return_dict = True,
         use_alibi = True,
+        use_blk_mask = True,
         **kwargs
     ):
 
@@ -74,6 +75,7 @@ class CustomConfig(PretrainedConfig):
         self.gamma_init = gamma_init
         self.return_dict = return_dict
         self.use_alibi = use_alibi
+        self.use_blk_mask = use_blk_mask
         super().__init__(tie_word_embeddings = tie_word_embeddings, **kwargs)
 
 class CustomPretrainedModel(PreTrainedModel):
@@ -129,6 +131,7 @@ class CustomModel(CustomPretrainedModel):
                 use_flash_attn = None,
                 use_alibi = None,
                 cache_position = None,
+                blk_mask = None,
                 ) -> Union[Tuple, BaseModelOutputWithPast]:
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states)
@@ -206,6 +209,7 @@ class CustomModel(CustomPretrainedModel):
                                        use_cache = use_cache, 
                                        use_flash_attn = use_flash_attn,
                                        use_alibi = use_alibi,
+                                       blk_mask = blk_mask,
                                        )
 
             hidden_states = layer_outputs[0]
@@ -422,6 +426,7 @@ class CustomModelCausal(CustomPretrainedModel, GenerationMixin):
                 use_flash_attn = None,
                 use_alibi = None,
                 cache_position = None,
+                blk_mask = None,
     ) -> Union[Tuple, CausalLMOutputWithPast]:
 
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
@@ -443,6 +448,7 @@ class CustomModelCausal(CustomPretrainedModel, GenerationMixin):
             return_dict=return_dict,
             use_flash_attn=use_flash_attn,
             cache_position = cache_position,
+            blk_mask = blk_mask,
         )
         
         hidden_states = outputs[0]

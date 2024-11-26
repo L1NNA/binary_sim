@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import math
 import numpy as np
-from flash_attn import flash_attn_qkvpacked_func, flash_attn_func
+# from flash_attn import flash_attn_qkvpacked_func, flash_attn_func
 from torch import Tensor
 from typing import Optional, Tuple, Union
 from einops import einsum, rearrange
@@ -58,6 +58,28 @@ def generate_alibi_bias(nq, nk, q_heads, kv_heads, device = 'cuda', dtype = torc
 
     return alibi_bias
 
+def generate_blk_bias(bsz, nq, nk, q_heads, kv_heads, blk_mask, device = 'cuda', dtype = torch.bfloat16): # b g h n s, where n = s
+    # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    num_heads = q_heads // kv_heads
+
+    for ex in blk_mask:
+        temp2 = torch.arange(ex.size(0), device = device)[ex.bool()]
+        temp3 = temp2[1:] - temp2[:-1] 
+        temp3 = torch.cat((temp2[:1], temp3))
+        temp3 = torch.log(temp3)
+        ex[temp2] = temp3.to(blk_mask.dtype)
+
+    blk_mask = rearrange(blk_mask, 'b s -> b () () () s')
+    blk_mask = blk_mask.expand(-1, num_heads, -1, -1, -1)  # [1, num_heads, 1, 1, seq_len]
+
+    # Define head-specific slopes (different for each head)
+    # slopes = torch.tensor([2 ** (-i / num_heads) for i in range(num_heads)], device=device, dtype = dtype).view(1, -1, 1, 1, 1) # compute slopes for each head
+
+    # Apply linear bias with slopes
+    # blk_bias = slopes * blk_mask  # [bsz, num_heads, 1, 1, seq_len]
+
+    return blk_mask
+
 def scaled_dot_product_gqa(
     query: Tensor,
     key: Tensor,
@@ -70,6 +92,7 @@ def scaled_dot_product_gqa(
     need_weights: bool = False,
     average_attn_weights: bool = False,
     use_alibi = True,
+    blk_mask = None,
 ):
     """Scaled dot product attention with support for grouped queries.
 
@@ -142,9 +165,15 @@ def scaled_dot_product_gqa(
     similarity = einsum(query, key, "b g h n d, b h s d -> b g h n s")
 
     ### apply ALiBi
-    if use_alibi:
+    if use_alibi and blk_mask is None:
         alibi = generate_alibi_bias(nq, nk, hq, hk, device = similarity.device, dtype = similarity.dtype)
         similarity = similarity + alibi
+
+    if use_alibi and blk_mask is not None:
+        
+        alibi = generate_alibi_bias(nq, nk, hq, hk, device = similarity.device, dtype = similarity.dtype)
+        blk_mask = generate_blk_bias(bq, nq, nk, hq, hk, blk_mask, device = similarity.device, dtype = similarity.dtype)
+        similarity = similarity + blk_mask + alibi
 
     # if is_causal:
     #     # Mask out the upper triangular portion of the attention matrix. This prevents
@@ -168,9 +197,13 @@ def scaled_dot_product_gqa(
         # Mask similarity values by setting them to negative infinity.  This guarantees
         # that they will not contribute to the softmax computation below.
         # similarity.masked_fill_(mask == 0, torch.finfo(similarity.dtype).min)
+
+        # if blk_mask is not None:
+        #     blk_mask = rearrange(blk_mask, "b s -> b () () () s")
+        #     mask *= blk_mask
         similarity += mask
 
-    attention = F.softmax(similarity, dim=-1)
+    attention = F.softmax(similarity, dim=-1, dtype=torch.float32).to(query.dtype)
     if dropout > 0.0:
         attention = F.dropout(attention, p=dropout)
 
@@ -194,6 +227,122 @@ def scaled_dot_product_gqa(
 class GroupedQueryAttentionWithALiBi(nn.Module):
     def __init__(self, config, layer_idx):
         super(GroupedQueryAttentionWithALiBi, self).__init__()
+        self.config = config
+        self.layer_idx = layer_idx
+        self.d_model = config.hidden_size
+        self.q_heads = config.num_attention_heads
+        self.kv_heads = config.kv_heads
+        self.dropout = config.dropout
+        self.d_ff = config.intermediate_size
+        self.gamma_init = config.gamma_init
+        self.is_causal = None
+        self.head_dim = self.d_model // self.q_heads
+        dtype = torch.bfloat16
+
+        if self.q_heads % self.kv_heads != 0:
+            raise ValueError(
+                f"query_heads ({self.q_heads}) must be divisible by "
+                f"kv_heads ({self.kv_heads})"
+            )
+        elif (self.d_model % self.q_heads != 0) or (self.d_model % self.kv_heads != 0):
+            raise ValueError(
+                f"embed_dim ({self.d_model}) must be divisible by "
+                f"query_heads ({self.d_model}) and kv_heads ({self.kv_heads})"
+            )
+        
+        if not self.head_dim % 8 == 0:
+            raise ValueError(
+                f"head_dim (embed_dim / num_heads = {self.head_dim}) must be divisible by 8"
+            )
+        if not self.head_dim <= 128:
+            raise ValueError(
+                f"head_dim (embed_dim / num_heads = {self.head_dim}) must be <= 128"
+            )
+
+
+        # Query, Key, and Value projections
+        # self.q_proj = nn.Linear(self.d_model, self.d_model, bias=False)
+        # self.k_proj = nn.Linear(self.d_model, self.head_dim*self.kv_heads, bias=False)
+        # self.v_proj = nn.Linear(self.d_model, self.head_dim*self.kv_heads, bias=False)
+
+
+        self.q_proj = nn.Linear(self.d_model, self.d_model, bias=True)
+        self.k_proj = nn.Linear(self.d_model, self.head_dim*self.kv_heads, bias=True)
+        self.v_proj = nn.Linear(self.d_model, self.head_dim*self.kv_heads, bias=True)
+
+        self.out_proj = nn.Linear(
+            self.d_model, self.d_model, bias = False
+        )
+
+        # self._reset_parameters()
+
+    def _reset_parameters(self):
+        nn.init.xavier_normal_(self.q_proj.weight)
+        if self.q_proj.bias is not None:
+            nn.init.constant_(self.q_proj.bias, 0)
+        nn.init.xavier_normal_(self.k_proj.weight)
+        if self.k_proj.bias is not None:
+            nn.init.constant_(self.k_proj.bias, 0)
+
+        # NOTE: We follow the initialization strategy from MAGNETO.  See:
+        # https://arxiv.org/pdf/2210.06423.pdf, Fig. 2
+        # Gain (self.gamma_init) should be provided as a keyword argument when
+        # initializing the larger Transformer model, since it requires knowledge
+        # of the number of encoder/decoder layers in the model.
+
+        nn.init.xavier_normal_(self.v_proj.weight, gain=self.gamma_init)
+        if self.v_proj.bias is not None:
+            nn.init.constant_(self.v_proj.bias, 0)
+        nn.init.xavier_normal_(self.out_proj.weight, gain=self.gamma_init)
+        if self.out_proj.bias is not None:
+            nn.init.constant_(self.out_proj.bias, 0)
+
+
+    def forward(self, hidden_states, 
+                attention_mask=None, 
+                position_ids=None, 
+                past_key_values=None, 
+                output_attentions=False, 
+                use_cache=False,
+                use_flash_attn = False,
+                use_alibi = True,
+                blk_mask = None):
+        b_size, seq_len, _ = hidden_states.size()
+        # attention_mask = attention_mask.unsqueeze(1)  #---> [b, 1, seq_len]
+        q = self.q_proj(hidden_states).reshape(b_size, seq_len, self.q_heads, self.head_dim).transpose(1,2) #[b, seq_len, q_heads, head_dim] 
+        k = self.k_proj(hidden_states).reshape(b_size, seq_len, self.kv_heads, self.head_dim).transpose(1,2) #[b, seq_len, kv_heads, head_dim] 
+        v = self.v_proj(hidden_states).reshape(b_size, seq_len, self.kv_heads, self.head_dim).transpose(1,2) #[b, seq_len, kv_heads, head_dim] 
+
+        if past_key_values is not None:
+            k, v = past_key_values.update(k, v, self.layer_idx)
+
+        if use_flash_attn:
+            assert output_attentions == False, "output_attentions is not supported with flash_attn"
+            # output = flash_attn_func(q, k, v, dropout_p=0.1, softmax_scale=None, causal=True,
+            #     window_size=(-1, -1), alibi_slopes=None, deterministic=False)
+        else:
+            # q = rearrange(q, 'b n q d -> b q n d')  #---> [b, q_heads, seq_len, head_dim]
+            # k = rearrange(k, 'b n k d -> b k n d')  #---> [b, kv_heads, seq_len, head_dim]
+            # v = rearrange(v, 'b n v d -> b v n d')  #---> [b, kv_heads, seq_len, head_dim]
+            output, attn = scaled_dot_product_gqa(q, k, v, 
+                                                  mask=attention_mask, 
+                                                  dropout = self.dropout, 
+                                                  need_weights=output_attentions,
+                                                  use_alibi = use_alibi,
+                                                  blk_mask = blk_mask)
+
+
+        output = rearrange(output, 'b n h d -> b n (h d)')  #---> [b, seq_len, d_model]
+        output = self.out_proj(output)
+
+        if output_attentions:
+            attn = None
+        
+        return output, attn, past_key_values
+    
+class BlockAttentionWithALiBi(nn.Module):
+    def __init__(self, config, layer_idx):
+        super(BlockAttentionWithALiBi, self).__init__()
         self.config = config
         self.layer_idx = layer_idx
         self.d_model = config.hidden_size
@@ -305,6 +454,7 @@ class GroupedQueryAttentionWithALiBi(nn.Module):
         
         return output, attn, past_key_values
 
+
 class CausalTransformerLayer(nn.Module):
 
     def __init__(self, 
@@ -317,6 +467,7 @@ class CausalTransformerLayer(nn.Module):
         self.attn = GroupedQueryAttentionWithALiBi(config, layer_idx)
         self.post_attention_layernorm = nn.RMSNorm(self.config.hidden_size)
         self.ff1 = LlamaFeedForward(self.config.hidden_size, self.config.intermediate_size)
+        self.blk_attn = BlockAttentionWithALiBi(config, layer_idx)
 
     def forward(self, 
                 hidden_states, 
@@ -327,6 +478,7 @@ class CausalTransformerLayer(nn.Module):
                 use_cache=None,
                 use_flash_attn = False,
                 use_alibi = True,
+                blk_mask = None
                 ):
         # torch.cuda.synchronize()
         residual = hidden_states
@@ -340,8 +492,24 @@ class CausalTransformerLayer(nn.Module):
                                                                         output_attentions=output_attentions,
                                                                         use_cache=use_cache,
                                                                         use_flash_attn=use_flash_attn,
-                                                                        use_alibi=use_alibi,)
+                                                                        use_alibi=use_alibi,
+                                                                        blk_mask = blk_mask,
+                                                                        )
         hidden_states = residual + hidden_states  ## residual connection
+
+        # if blk_mask is not None:
+        #     blk_hidden_states, blk_attn_weights, blk_kv_value = self.attn(hidden_states, 
+        #                                                                 attention_mask=attention_mask, 
+        #                                                                 position_ids=position_ids,
+        #                                                                 past_key_values=past_key_values,
+        #                                                                 output_attentions=output_attentions,
+        #                                                                 use_cache=use_cache,
+        #                                                                 use_flash_attn=use_flash_attn,
+        #                                                                 use_alibi=use_alibi,
+        #                                                                 blk_mask=blk_mask,
+        #                                                                 )
+
+        # hidden_states += blk_hidden_states
 
         # fully connected
         residual = hidden_states
