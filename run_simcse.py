@@ -87,6 +87,7 @@ if __name__ == "__main__":
     total_length = len(dataset)
     train_length = int(total_length * 0.9)
     val_length = total_length - train_length
+    torch.manual_seed(42)
     train_dataset, val_dataset = random_split(dataset, [train_length, val_length])
 
     ########## Training ##########

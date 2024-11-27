@@ -7,7 +7,7 @@ from models.base_embedding_model import EmbeddingMixin
 class Qwen2ForSequenceEmbedding(Qwen2Model, EmbeddingMixin):
 
     def get_hidden_state(self, input_ids, attention_mask):
-        return super(Qwen2Model, self).forward(
+        return super().forward(
             input_ids=input_ids, attention_mask=attention_mask
         ).last_hidden_state
 

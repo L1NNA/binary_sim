@@ -26,7 +26,6 @@ from models.bert_models import GraphCodeBERTForSequenceEmbedding
 models = {
     'qwen_emb': ('Alibaba-NLP/gte-Qwen2-1.5B-instruct', Qwen2ForSequenceEmbedding),
     'codet5p-110m-embedding': ('Salesforce/codet5p-110m-embedding', CodeT5PEncoderForSequenceEmbedding),
-    'jina_emb': ('jinaai/jina-embeddings-v2-base-code', None),
     'graphcodebert': ('microsoft/graphcodebert-base', GraphCodeBERTForSequenceEmbedding),
     'qwen_llm2vec': ('Qwen/Qwen2.5-Coder-0.5B-Instruct', Qwen2MNTPForSequenceEmbedding)
 }
@@ -91,16 +90,14 @@ def get_embeddings(
 if __name__ == "__main__":
     # Create the parser
     parser = argparse.ArgumentParser()
+    
+    # === hyperparameters ===
+    parser.add_argument("--instruct", type=int, default=0)
 
     # === model ===
     parser.add_argument("--model", choices=models.keys(), default='jina_emb', help="The model name")
     parser.add_argument("--local_model_path", type=str,)
     parser.add_argument("--local_tokenizer_path", type=str)
-    parser.add_argument(
-        # "--sft", type=str, default='lora',
-        "--sft_model", type=str, default=None,
-        help="whether to use sft model or pre-trained model"
-    )
 
     # === data ===
     parser.add_argument(
@@ -147,17 +144,20 @@ if __name__ == "__main__":
     architectures = ['arm', 'powerpc', 'x86_32', 'x86_64', 'mips']
     
     os.makedirs(join('./results', 'reterival'), exist_ok=True)
-    result_file = join('./results', 'reterival', f'{args.model}_{args.pool_size}.csv')
+    result_file = join('./results', 'reterival', f'{args.model}-{args.instruct}_{args.pool_size}.csv')
     with open(result_file, 'w') as f:
         f.write('source, dest, mrr, recall@1, recall@10\n')
 
     combinations = itertools.permutations(optimizations, 2)
     for o1, o2 in combinations:
+        instruction = None
+        if args.instruct == 1:
+            instruction = f'translate the following binary code in optimization {o1} to optimization {o2}'
         print(f'Testing reterival optimization {o1} to optimization {o2}')
         metrics = get_embeddings(
             model, tokenizer,
             args.data_path, o1, o2, args.pool_size, args.max_length, args.max_blocks,
-            args.test_batch_size, f'translate the following binary code in optimization {o1} to optimization {o2}',
+            args.test_batch_size, instruction,
         )
         print(f'Finished testing reterival optimization {o1} to optimization {o2}', metrics)
         with open(result_file, 'a') as f:
@@ -165,11 +165,14 @@ if __name__ == "__main__":
 
     combinations = itertools.permutations(obfuscations, 2)
     for o1, o2 in combinations:
+        instruction = None
+        if args.instruct == 1:
+            instruction = f'translate the following binary code obfuscated by {o1} to obfuscation {o2}'
         print(f'Testing reterival obfuscation {o1} to obfuscation {o2}')
         metrics = get_embeddings(
             model, tokenizer,
             args.data_path, o1, o2, args.pool_size, args.max_length, args.max_blocks,
-            args.test_batch_size, f'translate the following binary code obfuscated by {o1} to obfuscation {o2}',
+            args.test_batch_size, instruction,
         )
         print(f'Finished testing reterival obfuscation {o1} to obfuscation {o2}', metrics)
         with open(result_file, 'a') as f:
@@ -177,11 +180,14 @@ if __name__ == "__main__":
 
     combinations = itertools.permutations(compilers, 2)
     for c1, c2 in combinations:
+        instruction = None
+        if args.instruct == 1:
+            instruction = f'translate the following binary code compiled by {c1} to compiler {c2}'
         print(f'Testing reterival compiler {c1} to compiler {c2}')
         metrics = get_embeddings(
             model, tokenizer,
             args.data_path, c1, c2, args.pool_size, args.max_length, args.max_blocks,
-            args.test_batch_size, f'translate the following binary code compiled by {c1} to compiler {c2}',
+            args.test_batch_size, instruction,
         )
         print(f'Finished testing reterival compiler {c1} to compiler {c2}', metrics)
         with open(result_file, 'a') as f:
@@ -189,11 +195,14 @@ if __name__ == "__main__":
 
     combinations = itertools.permutations(architectures, 2)
     for a1, a2 in combinations:
+        instruction = None
+        if args.instruct == 1:
+            instruction = f'translate the following binary code in architecture {a1} to architecture {a2}'
         print(f'Testing reterival architecture {a1} to architecture {a2}')
         metrics = get_embeddings(
             model, tokenizer,
             args.data_path, a1, a2, args.pool_size, args.max_length, args.max_blocks,
-            args.test_batch_size, f'translate the following binary code in architecture {a1} to architecture {a2}',
+            args.test_batch_size, instruction,
         )
         print(f'Finished testing reterival architecture {a1} to architecture {a2}', metrics)
         with open(result_file, 'a') as f:
