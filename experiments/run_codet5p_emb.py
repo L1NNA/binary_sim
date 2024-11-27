@@ -19,7 +19,7 @@ from torch.utils.data import Dataset, DataLoader, random_split
 from sklearn.metrics import f1_score, recall_score, precision_score
 
 from models.coe_cos_sim import CoECosSim
-from models.codet5p_models import CodeT5PEmbeddingModel
+from models.codet5p_models import CodeT5PEncoderForSequenceEmbedding
 from data_loaders.pos_neg_bin_sim_dataset import BinSimDataset, pairwise_collate
 from data_loaders.sim_cse import SimCSEDataset
 from data_loaders.test_retrieval_dataset import RetrievalDataset
@@ -121,7 +121,7 @@ if __name__ == "__main__":
     val_length = total_length - train_length
     train_dataset, val_dataset = random_split(dataset, [train_length, val_length])
     
-    model = CodeT5PEmbeddingModel(backbone)
+    model = CodeT5PEncoderForSequenceEmbedding(backbone)
 
     ########## Training ##########
     # Define the training arguments

@@ -20,14 +20,14 @@ from utils.retrieval_utils import find_common_elements, get_detailed_instruct, t
 from models.llm2vec import Qwen2BiForMNTP, Qwen2LLM2Vec
 from utils import get_tokens
 from models.qwen_models import Qwen2Model
-from models.codet5p_models import CodeT5PEmbeddingModel
-from models.bert_models import GraphCodeBERTEmbedding
+from models.codet5p_models import CodeT5PEncoderForSequenceEmbedding
+from models.bert_models import GraphCodeBERTForSequenceEmbedding
 
 models = {
     'qwen_emb': ('Alibaba-NLP/gte-Qwen2-1.5B-instruct', Qwen2Model),
-    'codet5p-110m-embedding': ('Salesforce/codet5p-110m-embedding', CodeT5PEmbeddingModel),
+    'codet5p-110m-embedding': ('Salesforce/codet5p-110m-embedding', CodeT5PEncoderForSequenceEmbedding),
     'jina_emb': ('jinaai/jina-embeddings-v2-base-code', AutoModel),
-    'graphcodebert': ('microsoft/graphcodebert-base', GraphCodeBERTEmbedding),
+    'graphcodebert': ('microsoft/graphcodebert-base', GraphCodeBERTForSequenceEmbedding),
     'qwen_llm2vec': ('Qwen/Qwen2.5-Coder-0.5B-Instruct', Qwen2LLM2Vec),
     'qwen_sft': ('Qwen/Qwen2.5-Coder-0.5B-Instruct', None)
 }
