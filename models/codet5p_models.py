@@ -80,6 +80,9 @@ class CodeT5PEncoderForSequenceEmbedding(T5EncoderModel, EmbeddingMixin):
         super().__init__(config)
         self.proj = nn.Linear(config.d_model, config.embed_dim)
 
+    def get_pooling(self, hidden_state, attention_mask):
+        return hidden_state
+
     def get_hidden_state(
             self,
             input_ids,
@@ -93,7 +96,7 @@ class CodeT5PEncoderForSequenceEmbedding(T5EncoderModel, EmbeddingMixin):
         return embedding
 
     def forward(self, input_ids, attention_mask, y_input_ids=None, y_attention_mask=None, labels=None):
-        return super(EmbeddingMixin, self).embedding(
+        return self.embedding(
             input_ids, attention_mask, y_input_ids, y_attention_mask, labels
         )
     
@@ -109,6 +112,6 @@ class CodeT5PForSequenceEmbedding(T5ForConditionalGeneration, EmbeddingMixin):
         return hidden_states
 
     def forward(self, input_ids, attention_mask, y_input_ids=None, y_attention_mask=None, labels=None):
-        return super(EmbeddingMixin, self).embedding(
+        return self.embedding(
             input_ids, attention_mask, y_input_ids, y_attention_mask, labels
         )

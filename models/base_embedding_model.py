@@ -26,9 +26,7 @@ class EmbeddingMixin:
         raise 'Not implemented'
     
     def get_pooling(self, hidden_state, attention_mask):
-        pooling = self.config.__getattribute__('pooling')
-        if pooling is None:
-            pooling = 'mean'
+        pooling = getattr(self.config, 'pooling', 'mean')
         
         if pooling == 'mean':
             return mean_pooling(hidden_state)

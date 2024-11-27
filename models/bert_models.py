@@ -14,6 +14,6 @@ class GraphCodeBERTForSequenceEmbedding(RobertaModel, EmbeddingMixin):
         return hidden_state
 
     def forward(self, input_ids, attention_mask, y_input_ids=None, y_attention_mask=None, labels=None):
-        return super(EmbeddingMixin, self).embedding(
+        return self.embedding(
             input_ids, attention_mask, y_input_ids, y_attention_mask, labels
         )

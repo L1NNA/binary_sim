@@ -12,16 +12,15 @@ import torch.nn.functional as F
 from torch import Tensor
 
 from transformers import AutoTokenizer, AutoModel, AutoConfig
-from transformers import TrainingArguments, Trainer
+from transformers import TrainingArguments, Trainer, EarlyStoppingCallback
 from torch.utils.data import random_split
-
 
 from models.codet5p_models import CodeT5PEncoderForSequenceEmbedding, CodeT5PForSequenceEmbedding
 from models.bert_models import GraphCodeBERTForSequenceEmbedding
-from data_loaders.pos_neg_bin_sim_dataset import pairwise_collate
-from data_loaders.sim_cse import SimCSEDataset
 from models.qwen_models import Qwen2ForSequenceEmbedding, preload_qwen2_from_causal_lm
 from models.llm2vec import Qwen2MNTPForSequenceEmbedding
+from data_loaders.pos_neg_bin_sim_dataset import pairwise_collate
+from data_loaders.sim_cse import SimCSEDataset
 
 from run_test_retrieval import get_embeddings
 
@@ -29,10 +28,8 @@ from run_test_retrieval import get_embeddings
 models = {
     'qwen_emb': ('Alibaba-NLP/gte-Qwen2-1.5B-instruct', Qwen2ForSequenceEmbedding, None),
     'codet5p-110m-embedding': ('Salesforce/codet5p-110m-embedding', CodeT5PEncoderForSequenceEmbedding, None),
-    'codet5p-220m': ("Salesforce/codet5p-220m", CodeT5PForSequenceEmbedding, None),
-    'codet5p-770m': ("Salesforce/codet5p-770m", CodeT5PForSequenceEmbedding, None),
     'codeqwen': ('Qwen/Qwen2.5-Coder-0.5B-Instruct', Qwen2ForSequenceEmbedding, preload_qwen2_from_causal_lm),
-    'qwen2vec': ('Qwen/Qwen2.5-Coder-0.5B-Instruct', Qwen2MNTPForSequenceEmbedding, preload_qwen2_from_causal_lm),
+    'codeqwen2vec': ('Qwen/Qwen2.5-Coder-0.5B-Instruct', Qwen2MNTPForSequenceEmbedding, preload_qwen2_from_causal_lm),
     'graphcodebert': ('microsoft/graphcodebert-base', GraphCodeBERTForSequenceEmbedding, None),
 }
 
@@ -72,7 +69,7 @@ if __name__ == "__main__":
     # ================= Load Model ======================
     model_path, model_cls, pre_load = models[args.model]
     if pre_load:
-        model = pre_load(model_path, model_cls)
+        model = pre_load(model_path, model_cls, args.local_model_path)
     else:
         model = model_cls.from_pretrained(
             model_path if args.local_model_path is None else args.local_model_path,
@@ -113,15 +110,15 @@ if __name__ == "__main__":
     )
 
     # Define the Trainer
-    # metric_wrapper = lambda p: compute_metrics(p, join(output_dir, 'valid.jsonl'))
     collator_wrapper = lambda x:pairwise_collate(x, tokenizer, args.max_blocks, args.max_length)
+    early_stopping_callback = EarlyStoppingCallback(early_stopping_patience=3, early_stopping_threshold=1e-4)
     trainer = Trainer(
         model=model,
         args=training_args,
         train_dataset=train_dataset,
         eval_dataset=val_dataset,
         data_collator=collator_wrapper,
-        # compute_metrics=metric_wrapper,
+        callbacks=[early_stopping_callback],
     )
 
     # Train the model

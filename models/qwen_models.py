@@ -1,3 +1,4 @@
+import torch
 from transformers import Qwen2Model, Qwen2ForCausalLM
 
 from models.base_embedding_model import EmbeddingMixin
@@ -11,7 +12,7 @@ class Qwen2ForSequenceEmbedding(Qwen2Model, EmbeddingMixin):
         ).last_hidden_state
 
     def forward(self, input_ids, attention_mask, y_input_ids=None, y_attention_mask=None, labels=None):
-        return super(EmbeddingMixin, self).embedding(
+        return self.embedding(
             input_ids, attention_mask, y_input_ids, y_attention_mask, labels
         )
     
@@ -23,27 +24,30 @@ class Qwen2ForSequenceEmbedding(Qwen2Model, EmbeddingMixin):
         model.load_state_dict(causalLM.model.state_dict())
         return model
     
-def preload_qwen2_from_causal_lm(model_path, cls):
-    causalLM = Qwen2ForCausalLM.from_pretrained(model_path)
+def preload_qwen2_from_causal_lm(model_path, cls, local_path):
+    causalLM = Qwen2ForCausalLM.from_pretrained(
+        model_path if local_path is None else local_path,
+        torch_dtype = torch.bfloat16
+    )
     config = causalLM.config
     model = cls(config)
     # be careful about the device:cuda,cpu or data parallel
     model.load_state_dict(causalLM.model.state_dict())
     return model
 
-class Qwen2CausalForSequenceEmbedding(Qwen2ForCausalLM, EmbeddingMixin):
+# class Qwen2CausalForSequenceEmbedding(Qwen2ForCausalLM, EmbeddingMixin):
 
-    def __init__(self, config):
-        super().__init__(config)
-        self.lm_head.requires_grad_ = False
+#     def __init__(self, config):
+#         super().__init__(config)
+#         self.lm_head.requires_grad_ = False
 
-    def get_hidden_state(self, input_ids, attention_mask):
-        hidden_states =  super(Qwen2ForCausalLM, self).forward(
-            input_ids=input_ids, attention_mask=attention_mask, output_hidden_states=True 
-        )
-        return hidden_states[-1]
+#     def get_hidden_state(self, input_ids, attention_mask):
+#         hidden_states =  super(Qwen2ForCausalLM, self).forward(
+#             input_ids=input_ids, attention_mask=attention_mask, output_hidden_states=True 
+#         )
+#         return hidden_states[-1]
 
-    def forward(self, input_ids, attention_mask, y_input_ids=None, y_attention_mask=None, labels=None):
-        return super(EmbeddingMixin, self).embedding(
-            input_ids, attention_mask, y_input_ids, y_attention_mask, labels
-        )
+#     def forward(self, input_ids, attention_mask, y_input_ids=None, y_attention_mask=None, labels=None):
+#         return self.embedding(
+#             input_ids, attention_mask, y_input_ids, y_attention_mask, labels
+#         )
