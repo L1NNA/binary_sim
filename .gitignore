@@ -1,8 +1,8 @@
 checkpoints/
-libraries/
-model_checkpoints/
-results/
-datasets/
+libraries
+model_checkpoints
+results
+datasets
 **/*.ipynb_checkpoints
 __pycache__
 tokenizers/

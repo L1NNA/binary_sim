@@ -27,7 +27,7 @@ models = {
     'qwen_emb': ('Alibaba-NLP/gte-Qwen2-1.5B-instruct', Qwen2Model),
     'codet5p-110m-embedding': ('Salesforce/codet5p-110m-embedding', CodeT5PEmbeddingModel),
     'jina_emb': ('jinaai/jina-embeddings-v2-base-code', AutoModel),
-    'codebert': ('microsoft/codebert-base', GraphCodeBERTEmbedding),
+    'graphcodebert': ('microsoft/graphcodebert-base', GraphCodeBERTEmbedding),
     'qwen_llm2vec': ('Qwen/Qwen2.5-Coder-0.5B-Instruct', Qwen2LLM2Vec),
     'qwen_sft': ('Qwen/Qwen2.5-Coder-0.5B-Instruct', None)
 }
@@ -38,6 +38,7 @@ def load_data(data_path, source, target, pool_size, max_lines):
     source_dataset = RetrievalDataset(source_path, keys=None)
     target_dataset = RetrievalDataset(target_path, keys=None)
 
+    os.makedirs(join(data_path, 'samples'), exist_ok=True)
     cache_file = join(data_path, 'samples', f'{source}_to_{target}_{pool_size}.pt')
     # load pairs, the sampled pairs should be fixed across all baseline and models
     if exists(cache_file):
@@ -74,14 +75,14 @@ def get_embeddings(
     for i in trange(0, len(queries), test_batch_size, desc="Embedding queries"):
         with torch.no_grad():
             batch_dict = get_tokens(queries[i:i+test_batch_size], tokenizer, max_blocks, max_length).to(device)
-            query_outputs = model(**batch_dict)['preds'].cpu()
+            query_outputs = model(**batch_dict).embedding.cpu().float()
             query_embs.append(query_outputs)
     query_embs = torch.cat(query_embs, dim=0).view(-1, query_outputs.size(-1))
 
     for i in trange(0, len(values), test_batch_size, desc="Embedding values"):
         with torch.no_grad():
             batch_dict = get_tokens(values[i:i+test_batch_size], tokenizer, max_blocks, max_length).to(device)
-            value_outputs = model(**batch_dict)['preds'].cpu()
+            value_outputs = model(**batch_dict).embedding.cpu().float()
             value_embs.append(value_outputs)
     value_embs = torch.cat(value_embs, dim=0).view(-1, value_outputs.size(-1))
 
@@ -129,8 +130,9 @@ if __name__ == "__main__":
 
     # ================= Load Model ======================
     model_path, model_cls = models[args.model]
-    model = AutoModel.from_pretrained(
+    model = model_cls.from_pretrained(
         model_path if args.local_model_path is None else args.local_model_path,
+        device_map='auto',
         torch_dtype=torch.bfloat16
     )
     tokenizer = AutoTokenizer.from_pretrained(
@@ -144,8 +146,9 @@ if __name__ == "__main__":
     obfuscations = ['obf_all', 'obf_none', 'obf_sub', 'obf_fla', 'obf_bcf']
     compilers = ['clang', 'gcc']
     architectures = ['arm', 'powerpc', 'x86_32', 'x86_64', 'mips']
-        
-    result_file = join('./results/reterival', f'{args.model}_{args.pool_size}.csv')
+    
+    os.makedirs(join('./results', 'reterival'), exist_ok=True)
+    result_file = join('./results', 'reterival', f'{args.model}_{args.pool_size}.csv')
     with open(result_file, 'w') as f:
         f.write('source, dest, mrr, recall@1, recall@10\n')
 
@@ -183,7 +186,7 @@ if __name__ == "__main__":
         )
         print(f'Finished testing reterival compiler {c1} to compiler {c2}', metrics)
         with open(result_file, 'a') as f:
-            f.write(f"{c1}, {c2}, {metrics['mrr']}, {metrics['recall_at_11']}, {metrics['recall_at_10']}\n")
+            f.write(f"{c1}, {c2}, {metrics['mrr']}, {metrics['recall_at_1']}, {metrics['recall_at_10']}\n")
 
     combinations = itertools.permutations(architectures, 2)
     for a1, a2 in combinations:
