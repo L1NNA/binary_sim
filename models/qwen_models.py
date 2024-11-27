@@ -23,6 +23,13 @@ class Qwen2ForSequenceEmbedding(Qwen2Model, EmbeddingMixin):
         model.load_state_dict(causalLM.model.state_dict())
         return model
     
+def preload_qwen2_from_causal_lm(model_path, cls):
+    causalLM = Qwen2ForCausalLM.from_pretrained(model_path)
+    config = causalLM.config
+    model = cls(config)
+    # be careful about the device:cuda,cpu or data parallel
+    model.load_state_dict(causalLM.model.state_dict())
+    return model
 
 class Qwen2CausalForSequenceEmbedding(Qwen2ForCausalLM, EmbeddingMixin):
 

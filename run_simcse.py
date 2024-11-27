@@ -20,20 +20,20 @@ from models.codet5p_models import CodeT5PEncoderForSequenceEmbedding, CodeT5PFor
 from models.bert_models import GraphCodeBERTForSequenceEmbedding
 from data_loaders.pos_neg_bin_sim_dataset import pairwise_collate
 from data_loaders.sim_cse import SimCSEDataset
-from models.qwen_models import Qwen2ForSequenceEmbedding, Qwen2CausalForSequenceEmbedding
-from models.llm2vec import Qwen2MNTPCausalForSequenceEmbedding
+from models.qwen_models import Qwen2ForSequenceEmbedding, preload_qwen2_from_causal_lm
+from models.llm2vec import Qwen2MNTPForSequenceEmbedding
 
 from run_test_retrieval import get_embeddings
 
 
 models = {
-    'qwen_emb': ('Alibaba-NLP/gte-Qwen2-1.5B-instruct', Qwen2ForSequenceEmbedding),
-    'codet5p-110m-embedding': ('Salesforce/codet5p-110m-embedding', CodeT5PEncoderForSequenceEmbedding),
-    'codet5p-220m': ("Salesforce/codet5p-220m", CodeT5PForSequenceEmbedding),
-    'codet5p-770m': ("Salesforce/codet5p-770m", CodeT5PForSequenceEmbedding),
-    'codeqwen': ('Qwen/Qwen2.5-Coder-0.5B-Instruct', Qwen2CausalForSequenceEmbedding),
-    'qwen2vec': ('Qwen/Qwen2.5-Coder-0.5B-Instruct', Qwen2MNTPCausalForSequenceEmbedding),
-    'graphcodebert': ('microsoft/graphcodebert-base', GraphCodeBERTForSequenceEmbedding),
+    'qwen_emb': ('Alibaba-NLP/gte-Qwen2-1.5B-instruct', Qwen2ForSequenceEmbedding, None),
+    'codet5p-110m-embedding': ('Salesforce/codet5p-110m-embedding', CodeT5PEncoderForSequenceEmbedding, None),
+    'codet5p-220m': ("Salesforce/codet5p-220m", CodeT5PForSequenceEmbedding, None),
+    'codet5p-770m': ("Salesforce/codet5p-770m", CodeT5PForSequenceEmbedding, None),
+    'codeqwen': ('Qwen/Qwen2.5-Coder-0.5B-Instruct', Qwen2ForSequenceEmbedding, preload_qwen2_from_causal_lm),
+    'qwen2vec': ('Qwen/Qwen2.5-Coder-0.5B-Instruct', Qwen2MNTPForSequenceEmbedding, preload_qwen2_from_causal_lm),
+    'graphcodebert': ('microsoft/graphcodebert-base', GraphCodeBERTForSequenceEmbedding, None),
 }
 
 
@@ -70,15 +70,15 @@ if __name__ == "__main__":
 
     
     # ================= Load Model ======================
-    model_path, model_cls = models[args.model]
-    config = AutoConfig.from_pretrained(model_path if args.local_model_path is None else args.local_model_path)
-    config.torch_dtype = torch.bfloat16
-    model = model_cls.from_pretrained(
-        model_path if args.local_model_path is None else args.local_model_path,
-        config=config,
-        trust_remote_code=True,
-        torch_dtype = torch.bfloat16
-    )
+    model_path, model_cls, pre_load = models[args.model]
+    if pre_load:
+        model = pre_load(model_path, model_cls)
+    else:
+        model = model_cls.from_pretrained(
+            model_path if args.local_model_path is None else args.local_model_path,
+            trust_remote_code=True,
+            torch_dtype = torch.bfloat16
+        )
     tokenizer = AutoTokenizer.from_pretrained(
         model_path if args.local_tokenizer_path is None else args.local_tokenizer_path,
         trust_remote_code=True,
