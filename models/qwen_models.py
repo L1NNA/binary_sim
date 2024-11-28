@@ -1,7 +1,10 @@
 import torch
+import torch.nn as nn
 from transformers import Qwen2Model, Qwen2ForCausalLM
 
-from models.base_embedding_model import EmbeddingMixin
+from models.base_embedding_model import EmbeddingMixin, EmbeddingOutput
+from layers.pooling import attention_mask_pooling
+from layers.loss import info_nce
 
 
 class Qwen2ForSequenceEmbedding(Qwen2Model, EmbeddingMixin):
@@ -15,6 +18,9 @@ class Qwen2ForSequenceEmbedding(Qwen2Model, EmbeddingMixin):
         return self.embedding(
             input_ids, attention_mask, y_input_ids, y_attention_mask, labels
         )
+    
+    def get_pooling(self, hidden_state, attention_mask):
+        return attention_mask_pooling(hidden_state, attention_mask)
     
     @classmethod
     def from_causal_lm(cls, causalLM:Qwen2ForCausalLM):

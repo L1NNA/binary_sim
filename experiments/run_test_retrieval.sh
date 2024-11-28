@@ -1,4 +1,4 @@
-export CUDA_VISIBLE_DEVICES=2
+# export CUDA_VISIBLE_DEVICES=2
 
 # python run_test_retrieval.py \
 #     --model 'codet5p-110m-embedding' --local_model_path "./model_checkpoints/simcse_codet5p-110m-embedding/checkpoint-1608" \
@@ -10,7 +10,7 @@ export CUDA_VISIBLE_DEVICES=2
     
 python run_test_retrieval.py \
     --model 'qwen_emb' \
-    --max_length 512 --test_batch_size 8 --instruct 1
+    --max_length 1024 --test_batch_size 128 --instruct 1
 
     
 # python run_test_retrieval.py \

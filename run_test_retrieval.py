@@ -128,9 +128,10 @@ if __name__ == "__main__":
     model_path, model_cls = models[args.model]
     model = model_cls.from_pretrained(
         model_path if args.local_model_path is None else args.local_model_path,
-        device_map='auto',
+        # device_map='auto',
         torch_dtype=torch.bfloat16
-    )
+    ).to('cuda:0')
+    model = nn.DataParallel(model)
     tokenizer = AutoTokenizer.from_pretrained(
         model_path if args.local_tokenizer_path is None else args.local_tokenizer_path,
         trust_remote_code=True,
