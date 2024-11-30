@@ -45,6 +45,7 @@ def generate_alibi_bias(nq, nk, q_heads, kv_heads, device = 'cuda', dtype = torc
     num_heads = q_heads // kv_heads
     # Create relative positions matrix: [seq_len, seq_len]
     relative_positions = torch.arange(nk, device=device).unsqueeze(0).to(dtype=dtype) - torch.arange(nk, device=device).unsqueeze(1).to(dtype=dtype)
+    relative_positions = -torch.abs(relative_positions)
     # relative_positions = torch.arange(nk, device=device).view(1, -1).to(dtype=dtype) - torch.arange(nk, device=device).view(-1, 1).to(dtype=dtype)
     relative_positions = relative_positions[-nq:]
     relative_positions = rearrange(relative_positions, 'n m -> () () () n m')  # [1, 1, 1, seq_len, seq_len]
@@ -58,7 +59,7 @@ def generate_alibi_bias(nq, nk, q_heads, kv_heads, device = 'cuda', dtype = torc
 
     return alibi_bias
 
-def generate_blk_bias(bsz, nq, nk, q_heads, kv_heads, blk_mask, device = 'cuda', dtype = torch.bfloat16): # b g h n s, where n = s
+def generate_blk_bias(q_heads, kv_heads, blk_mask, device = 'cuda', dtype = torch.bfloat16): # b g h n s, where n = s
     # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     num_heads = q_heads // kv_heads
 

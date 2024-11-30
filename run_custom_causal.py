@@ -43,7 +43,7 @@ if __name__ == "__main__":
         help="The batch size."
     )
     parser.add_argument(
-        "--test_batch_size", type=int, default=12,
+        "--test_batch_size", type=int, default=8,
         help="The batch size."
     )
     parser.add_argument(
@@ -194,7 +194,7 @@ if __name__ == "__main__":
     # outputs = model(**input, max_new_tokens=150, use_cache=True, past_key_values=DynamicCache())
     
 
-    print(summary(model))
+    # print(summary(model))
 
     ################# Train the model ##############################
     current_time = datetime.now().strftime("%Y-%m-%d_%H-%M")
