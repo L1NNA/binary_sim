@@ -19,15 +19,15 @@ def gte_loss(x_emb, y_emb, scale):
     batch_size = x_emb.size(0)
     labels = torch.arange(batch_size, device=x_emb.device)
     xiy = F.cosine_similarity(x_emb.unsqueeze(1), \
-        y_emb.unsqueeze(0), dim=2)
+        y_emb.unsqueeze(0), dim=2) * scale
     yix = F.cosine_similarity(y_emb.unsqueeze(1), \
-        x_emb.unsqueeze(0), dim=2)
+        x_emb.unsqueeze(0), dim=2) * scale
     yix[labels, labels] = -torch.inf
     xix = F.cosine_similarity(x_emb.unsqueeze(1), \
-        x_emb.unsqueeze(0), dim=2)
+        x_emb.unsqueeze(0), dim=2) * scale
     xix[labels, labels] = -torch.inf
     yiy = F.cosine_similarity(y_emb.unsqueeze(1), \
-        y_emb.unsqueeze(0), dim=2)
+        y_emb.unsqueeze(0), dim=2) * scale
     yiy[labels, labels] = -torch.inf
     
     similarities = torch.cat([
