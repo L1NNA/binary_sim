@@ -45,8 +45,7 @@ def generate_alibi_bias(nq, nk, q_heads, kv_heads, device = 'cuda', dtype = torc
     num_heads = q_heads // kv_heads
     # Create relative positions matrix: [seq_len, seq_len]
     relative_positions = torch.arange(nk, device=device).unsqueeze(0).to(dtype=dtype) - torch.arange(nk, device=device).unsqueeze(1).to(dtype=dtype)
-    relative_positions = -torch.abs(relative_positions)
-    # relative_positions = torch.arange(nk, device=device).view(1, -1).to(dtype=dtype) - torch.arange(nk, device=device).view(-1, 1).to(dtype=dtype)
+    relative_positions = -torch.abs(relative_positions) 
     relative_positions = relative_positions[-nq:]
     relative_positions = rearrange(relative_positions, 'n m -> () () () n m')  # [1, 1, 1, seq_len, seq_len]
     relative_positions = relative_positions.expand(-1, num_heads, -1, -1, -1)  # [1, num_heads, 1, seq_len, seq_len]
@@ -59,19 +58,35 @@ def generate_alibi_bias(nq, nk, q_heads, kv_heads, device = 'cuda', dtype = torc
 
     return alibi_bias
 
-def generate_blk_bias(q_heads, kv_heads, blk_mask, device = 'cuda', dtype = torch.bfloat16): # b g h n s, where n = s
-    # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    num_heads = q_heads // kv_heads
+def generate_blk_bias(q_heads, kv_heads, blk_mask, device = 'cuda', dtype = torch.bfloat16, use_log = False, flexattn = False):
+    alibi = kv_heads == 1
+    num_heads = q_heads // kv_heads if alibi else q_heads
+    # blk_mask = blk_mask.to(dtype)
 
     for ex in blk_mask:
         temp2 = torch.arange(ex.size(0), device = device)[ex.bool()]
         temp3 = temp2[1:] - temp2[:-1] 
         temp3 = torch.cat((temp2[:1], temp3))
-        temp3 = torch.log(temp3)
-        ex[temp2] = temp3.to(blk_mask.dtype)
+        if use_log:
+            temp3 = torch.log(temp3).long()
+        ex[temp2] = temp3
+    
+    if alibi:
+        blk_mask = rearrange(blk_mask, 'b s -> b () () () s')
+        # blk_mask = blk_mask.expand(-1, num_heads, -1, -1, -1)  # [bsz, num_heads, 1, 1, seq_len]
+    elif flexattn:
+        blk_mask = rearrange(blk_mask, 'b s -> b () s').expand(-1, num_heads, -1)  # [bsz, num_heads, seq_len, 1]
+        slopes = torch.tensor([2 ** (-i / num_heads) for i in range(num_heads)], device=device, dtype = dtype).view(1, -1, 1) # compute slopes for each head
+        blk_mask = slopes * blk_mask  # [1, num_heads, 1, seq_len]
+    else:
+        blk_mask = rearrange(blk_mask, 'b s -> b () s ()').expand(-1, num_heads, -1, -1)  # [bsz, num_heads, seq_len, 1]
+        # blk_mask = blk_mask.expand(-1, num_heads, -1, -1)  # [1, num_heads, 1, 1, seq_len]
 
-    blk_mask = rearrange(blk_mask, 'b s -> b () () () s')
-    blk_mask = blk_mask.expand(-1, num_heads, -1, -1, -1)  # [1, num_heads, 1, 1, seq_len]
+    
+    
+
+    
+    
 
     # Define head-specific slopes (different for each head)
     # slopes = torch.tensor([2 ** (-i / num_heads) for i in range(num_heads)], device=device, dtype = dtype).view(1, -1, 1, 1, 1) # compute slopes for each head
@@ -173,7 +188,7 @@ def scaled_dot_product_gqa(
     if use_alibi and blk_mask is not None:
         
         alibi = generate_alibi_bias(nq, nk, hq, hk, device = similarity.device, dtype = similarity.dtype)
-        blk_mask = generate_blk_bias(bq, nq, nk, hq, hk, blk_mask, device = similarity.device, dtype = similarity.dtype)
+        blk_mask = generate_blk_bias(hq, hk, blk_mask, device = similarity.device, dtype = similarity.dtype)
         similarity = similarity + blk_mask + alibi
 
     # if is_causal:
@@ -319,8 +334,8 @@ class GroupedQueryAttentionWithALiBi(nn.Module):
 
         if use_flash_attn:
             assert output_attentions == False, "output_attentions is not supported with flash_attn"
-            # output = flash_attn_func(q, k, v, dropout_p=0.1, softmax_scale=None, causal=True,
-            #     window_size=(-1, -1), alibi_slopes=None, deterministic=False)
+            output = flash_attn_func(q, k, v, dropout_p=0.1, softmax_scale=None, causal=True,
+                window_size=(-1, -1), alibi_slopes=None, deterministic=False)
         else:
             # q = rearrange(q, 'b n q d -> b q n d')  #---> [b, q_heads, seq_len, head_dim]
             # k = rearrange(k, 'b n k d -> b k n d')  #---> [b, kv_heads, seq_len, head_dim]

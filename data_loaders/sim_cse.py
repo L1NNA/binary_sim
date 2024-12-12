@@ -20,7 +20,11 @@ class SimCSEDataset(Dataset):
             i = 0
             for line in tqdm(f, desc=f'Loading {stage} dataset'):
                 line = line.strip()
-                js = BinFunc(**json.loads(line))
+                data = json.loads(line)
+                if 'function_name' in data:
+                    data['function'] = data['function_name']
+                    del data['function_name']
+                js = BinFunc(**data)
                 self.pairs.append(js)
                 bins[js.function].append(i) # add the index to bin
                 i += 1

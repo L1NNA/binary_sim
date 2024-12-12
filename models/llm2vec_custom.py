@@ -14,12 +14,15 @@ from transformers.models.qwen2.modeling_qwen2 import (
 )
 import math
 from transformers.utils import logging
-from transformers.cache_utils import Cache, DynamicCache
+from transformers.cache_utils import Cache, DynamicCache, StaticCache, SlidingWindowCache
 from layers.attention import generate_alibi_bias, generate_blk_bias
 from transformers.modeling_outputs import BaseModelOutputWithPast, CausalLMOutputWithPast
+from transformers.modeling_attn_mask_utils import AttentionMaskConverter
 
 import torch
+from einops import einsum, rearrange
 from torch import nn
+from torch.nn.attention.flex_attention import flex_attention, create_block_mask
 
 
 class CustomQwen2Attention(nn.Module):
@@ -101,20 +104,16 @@ class CustomQwen2Attention(nn.Module):
             key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx)
 
         # alibi_bias is used as positional bias, [1, n_heads, 1, q_len, k_len]
-        alibi_bias = generate_alibi_bias(query_states.size(2), 
-                                         key_states.size(2), 
-                                         key_states.size(1), 
-                                         key_states.size(1), 
-                                         device=query_states.device, 
-                                         dtype=query_states.dtype)
-        blk_bias = 0
         if blk_mask is not None:
-            blk_bias = generate_blk_bias(key_states.size(1), 
-                                        key_states.size(1), 
+            blk_bias = generate_blk_bias(self.num_heads, 
+                                        self.num_key_value_heads, 
                                         blk_mask,
                                         device=query_states.device, 
-                                        dtype=query_states.dtype)
+                                        dtype=query_states.dtype,
+                                        )
         
+        # blk_bias = blk_bias.to(query_states.dtype) / torch.norm(blk_bias.to(query_states.dtype), p=2)
+        # blk_bias = blk_bias.to(query_states.dtype)
 
         # repeat k/v heads if n_kv_heads < n_heads
         key_states = repeat_kv(key_states, self.num_key_value_groups)
@@ -125,11 +124,8 @@ class CustomQwen2Attention(nn.Module):
             causal_mask = attention_mask[:, :, :, : key_states.shape[-2]]
             attn_weights = attn_weights + causal_mask
 
-        attn_weights = attn_weights.view(bsz, self.num_key_value_groups, self.num_key_value_heads, q_len, self.head_dim).contiguous + alibi_bias + blk_bias
-        attn_weights = attn_weights.view(bsz, self.num_heads, q_len, self.head_dim)
         
-        
-
+        attn_weights += blk_bias
         # upcast attention to fp32
         attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(query_states.dtype)
         attn_weights = nn.functional.dropout(attn_weights, p=self.attention_dropout, training=self.training)
@@ -150,6 +146,196 @@ class CustomQwen2Attention(nn.Module):
             attn_weights = None
 
         return attn_output, attn_weights, past_key_value
+    
+class Qwen2SdpaAttentionWithBlkBias(Qwen2Attention):
+    """
+    Qwen2 attention module using torch.nn.functional.scaled_dot_product_attention. This module inherits from
+    `Qwen2Attention` as the weights of the module stays untouched. The only changes are on the forward pass to adapt to
+    SDPA API.
+    """
+
+    def __init__(self, config: Qwen2Config, layer_idx: Optional[int] = None):
+        super().__init__(config, layer_idx)
+        self.config = config
+        self.layer_idx = layer_idx
+        if layer_idx is None:
+            logger.warning_once(
+                f"Instantiating {self.__class__.__name__} without passing `layer_idx` is not recommended and will "
+                "to errors during the forward call, if caching is used. Please make sure to provide a `layer_idx` "
+                "when creating this class."
+            )
+
+        self.hidden_size = config.hidden_size
+        self.num_heads = config.num_attention_heads
+        self.head_dim = self.hidden_size // self.num_heads
+        self.num_key_value_heads = config.num_key_value_heads
+        self.num_key_value_groups = self.num_heads // self.num_key_value_heads
+        self.max_position_embeddings = config.max_position_embeddings
+        self.rope_theta = config.rope_theta
+        self.is_causal = True
+        self.attention_dropout = config.attention_dropout
+        self.use_flex = getattr(config, 'use_flex', False)
+
+        if (self.head_dim * self.num_heads) != self.hidden_size:
+            raise ValueError(
+                f"hidden_size must be divisible by num_heads (got `hidden_size`: {self.hidden_size}"
+                f" and `num_heads`: {self.num_heads})."
+            )
+        self.q_proj = nn.Linear(self.hidden_size, self.num_heads * self.head_dim, bias=True)
+        self.k_proj = nn.Linear(self.hidden_size, self.num_key_value_heads * self.head_dim, bias=True)
+        self.v_proj = nn.Linear(self.hidden_size, self.num_key_value_heads * self.head_dim, bias=True)
+        self.o_proj = nn.Linear(self.num_heads * self.head_dim, self.hidden_size, bias=False)
+
+        self.rotary_emb = Qwen2RotaryEmbedding(config=self.config)
+        self.use_flex = getattr(config, 'use_flex', False)
+        
+        # require_blk_mask = getattr(config, 'require_blk_mask', False)
+        # if require_blk_mask:
+        #     self.blk_proj = nn.Linear(self.hidden_size, self.hidden_size, bias=False)
+        # self.arch_proj = nn.Linear(self.hidden_size, 4 * self.head_dim, bias=True)
+
+    # Adapted from Qwen2Attention.forward
+    def forward(
+        self,
+        hidden_states: torch.Tensor,
+        attention_mask: Optional[torch.Tensor] = None,
+        blk_mask: Optional[torch.Tensor] = None,
+        flex_block_mask: Optional[torch.Tensor] = None,
+        arch_embeds: Optional[torch.Tensor] = None,
+        position_ids: Optional[torch.LongTensor] = None,
+        past_key_value: Optional[Cache] = None,
+        output_attentions: bool = False,
+        use_cache: bool = False,
+        cache_position: Optional[torch.LongTensor] = None,
+        position_embeddings: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,  # will become mandatory in v4.46
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
+        if output_attentions:
+            # TODO: Improve this warning with e.g. `model.config.attn_implementation = "manual"` once this is implemented.
+            logger.warning_once(
+                "Qwen2Model is using Qwen2SdpaAttention, but `torch.nn.functional.scaled_dot_product_attention` does not support `output_attentions=True`. Falling back to the manual attention implementation, "
+                'but specifying the manual implementation will be required from Transformers version v5.0.0 onwards. This warning can be removed using the argument `attn_implementation="eager"` when loading the model.'
+            )
+            return super().forward(
+                hidden_states=hidden_states,
+                attention_mask=attention_mask,
+                position_ids=position_ids,
+                past_key_value=past_key_value,
+                output_attentions=output_attentions,
+                use_cache=use_cache,
+            )
+
+        bsz, q_len, _ = hidden_states.size()
+
+        query_states = self.q_proj(hidden_states)
+        key_states = self.k_proj(hidden_states)
+        value_states = self.v_proj(hidden_states)
+        
+
+        query_states = query_states.view(bsz, q_len, self.num_heads, self.head_dim).transpose(1, 2)
+        key_states = key_states.view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
+        value_states = value_states.view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
+        
+            
+        
+
+        if position_embeddings is None:
+            logger.warning_once(
+                "The attention layers in this model are transitioning from computing the RoPE embeddings internally "
+                "through `position_ids` (2D tensor with the indexes of the tokens), to using externally computed "
+                "`position_embeddings` (Tuple of tensors, containing cos and sin). In v4.46 `position_ids` will be "
+                "removed and `position_embeddings` will be mandatory."
+            )
+            cos, sin = self.rotary_emb(value_states, position_ids)
+        else:
+            cos, sin = position_embeddings
+        query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
+
+        
+
+        if past_key_value is not None:
+            cache_kwargs = {"sin": sin, "cos": cos, "cache_position": cache_position}  # Specific to RoPE models
+            key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, cache_kwargs)
+
+        # if arch_embeds is not None:
+        #     ## arch_embeds [bsz, q_len, hidden_size]
+        #     ## only applies to the first 4 heads
+        #     arch_states = self.arch_proj(arch_embeds).view(bsz, 4, q_len, self.head_dim).transpose(1, 2)
+        #     query_states[:, :4, :, :] += arch_states
+
+
+        key_states = repeat_kv(key_states, self.num_key_value_groups)
+        value_states = repeat_kv(value_states, self.num_key_value_groups)
+
+        # blk_bias = blk_bias.to(query_states.dtype)
+        # with torch.no_grad():
+        #     mean_blk_bias, std_blk_bias = blk_bias[:,0,:,0][blk_mask.bool()].mean(), blk_bias[:,0,:,0][blk_mask.bool()].std()
+        #     mean_q, std_q = query_states.mean(), query_states.std()
+        #     blk_bias[:,0,:,0][blk_mask.bool()] = (blk_bias[:,0,:,0][blk_mask.bool()] - mean_blk_bias) / std_blk_bias * std_q + mean_q
+        
+        blk_states = None
+        if blk_mask is not None:
+            blk_bias = generate_blk_bias(self.num_heads, 
+                                        self.num_key_value_heads, 
+                                        blk_mask,
+                                        device=query_states.device, 
+                                        dtype=query_states.dtype,
+                                        flexattn=self.use_flex,
+                                        alibi=False
+                                        )
+            # blk_states = self.blk_proj(hidden_states)
+            # blk_states = blk_states * blk_mask.unsqueeze(-1)
+            # blk_states = blk_states.view(bsz, q_len, self.num_heads, self.head_dim).transpose(1, 2)
+            # query_states += blk_states
+            query_states += 0.2*blk_bias
+            key_states += 0.2*blk_bias
+
+        causal_mask = attention_mask
+        if attention_mask is not None:  # no matter the length, we just slice it
+            causal_mask = attention_mask[:, :, :, : key_states.shape[-2]]
+
+        # SDPA with memory-efficient backend is currently (torch==2.1.2) bugged with non-contiguous inputs with custom attn_mask,
+        # Reference: https://github.com/pytorch/pytorch/issues/112577.
+        if query_states.device.type == "cuda" and attention_mask is not None:
+            query_states = query_states.contiguous()
+            key_states = key_states.contiguous()
+            value_states = value_states.contiguous()
+
+        # We dispatch to SDPA's Flash Attention or Efficient kernels via this `is_causal` if statement instead of an inline conditional assignment
+        # in SDPA to support both torch.compile's dynamic shapes and full graph options. An inline conditional prevents dynamic shapes from compiling.
+        # The q_len > 1 is necessary to match with AttentionMaskConverter.to_causal_4d that does not create a causal mask in case q_len == 1.
+        is_causal = True if causal_mask is None and q_len > 1 else False
+
+        
+
+        if self.use_flex:
+            def bias_mod(score, b, h, q_idx, kv_idx):
+                # return score + mask_flex[b, q_idx, kv_idx]
+                return score + blk_bias[b, h, kv_idx]
+
+            attn_output = flex_attention(
+                query_states,
+                key_states,
+                value_states,
+                score_mod = bias_mod,
+                block_mask = flex_block_mask,
+            )
+
+        else:
+            attn_output = torch.nn.functional.scaled_dot_product_attention(
+            query_states,
+            key_states,
+            value_states,
+            attn_mask=causal_mask,
+            dropout_p=self.attention_dropout if self.training else 0.0,
+            is_causal=is_causal,
+        )
+
+        attn_output = attn_output.transpose(1, 2).contiguous()
+        attn_output = attn_output.view(bsz, q_len, self.hidden_size)
+
+        attn_output = self.o_proj(attn_output)
+
+        return attn_output, None, past_key_value
 
 
 logger = logging.get_logger(__name__)
@@ -174,7 +360,7 @@ class ModifiedQwen2SdpaAttention(Qwen2SdpaAttention):
 
 
 QWEN2_ATTENTION_CLASSES = {
-    "eager": ModifiedQwen2Attention,
+    "eager": Qwen2SdpaAttentionWithBlkBias,
     "flash_attention_2": ModifiedQwen2FlashAttention2,
     "sdpa": ModifiedQwen2SdpaAttention,
 }
@@ -185,9 +371,18 @@ class ModifiedQwen2DecoderLayer(Qwen2DecoderLayer):
         nn.Module.__init__(self)
         self.hidden_size = config.hidden_size
 
-        self.self_attn = CustomQwen2Attention(
+        # self.self_attn = Qwen2SdpaAttentionWithBlkBias(
+        #     config=config, layer_idx=layer_idx
+        # )
+
+        self.self_attn = QWEN2_ATTENTION_CLASSES[config._attn_implementation](
             config=config, layer_idx=layer_idx
         )
+
+        # self.self_attn = CustomQwen2Attention(
+        #     config=config, layer_idx=layer_idx
+        # )
+
 
         self.mlp = Qwen2MLP(config)
         self.input_layernorm = Qwen2RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
@@ -265,7 +460,7 @@ class ModifiedQwen2DecoderLayer(Qwen2DecoderLayer):
         return outputs
 
 
-class Qwen2BiModel(Qwen2Model):
+class CustomQwen2BiModel(Qwen2Model):
     _no_split_modules = ["ModifiedQwen2DecoderLayer"]
 
     def __init__(self, config: Qwen2Config):
@@ -286,13 +481,115 @@ class Qwen2BiModel(Qwen2Model):
         self.norm = Qwen2RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
         self.gradient_checkpointing = False
+        arch_embed = getattr(config, 'arch_embed', False)
+        if arch_embed:
+            self.embed_arch = nn.Embedding(4, config.hidden_size)
+        self.use_flex = getattr(config, 'use_flex', False)
         # Initialize weights and apply final processing
         self.post_init()
+    
+    def _update_causal_mask(
+        self,
+        attention_mask,
+        input_tensor,
+        cache_position,
+        past_key_values: Cache,
+        output_attentions: bool,
+    ):
+        if self.config._attn_implementation == "flash_attention_2":
+            if attention_mask is not None and 0.0 in attention_mask:
+                return attention_mask
+            return None
+
+        # For SDPA, when possible, we will rely on its `is_causal` argument instead of its `attn_mask` argument, in
+        # order to dispatch on Flash Attention 2. This feature is not compatible with static cache, as SDPA will fail
+        # to infer the attention mask.
+        past_seen_tokens = (
+            past_key_values.get_seq_length() if past_key_values is not None else 0
+        )
+        using_static_cache = isinstance(past_key_values, StaticCache)
+
+        # When output attentions is True, sdpa implementation's forward method calls the eager implementation's forward
+        # if self.config._attn_implementation == "sdpa" and not using_static_cache and not output_attentions:
+        #     if AttentionMaskConverter._ignore_causal_mask_sdpa(
+        #         attention_mask,
+        #         inputs_embeds=input_tensor,
+        #         past_key_values_length=past_seen_tokens,
+        #         is_training=self.training,
+        #     ):
+        #         return None
+
+        dtype, device = input_tensor.dtype, input_tensor.device
+        min_dtype = torch.finfo(dtype).min
+        sequence_length = input_tensor.shape[1]
+        if using_static_cache:
+            target_length = past_key_values.get_max_length()
+        else:
+            target_length = (
+                attention_mask.shape[-1]
+                if isinstance(attention_mask, torch.Tensor)
+                else past_seen_tokens + sequence_length + 1
+            )
+
+        causal_mask = torch.zeros(
+            (sequence_length, target_length), dtype=dtype, device=device
+        )  # in original implementation - torch.full((sequence_length, target_length), fill_value=min_dtype, dtype=dtype, device=device)
+        # Commenting out next 2 lines to disable causal masking
+        # if sequence_length != 1:
+        #     causal_mask = torch.triu(causal_mask, diagonal=1)
+        causal_mask *= torch.arange(
+            target_length, device=device
+        ) > cache_position.reshape(-1, 1)
+        causal_mask = causal_mask[None, None, :, :].expand(
+            input_tensor.shape[0], 1, -1, -1
+        )
+        if attention_mask is not None:
+            causal_mask = (
+                causal_mask.clone()
+            )  # copy to contiguous memory for in-place edit
+            if attention_mask.dim() == 2:
+                mask_length = attention_mask.shape[-1]
+                padding_mask = causal_mask[..., :mask_length].eq(0.0) * attention_mask[
+                    :, None, None, :
+                ].eq(0.0)
+                causal_mask[..., :mask_length] = causal_mask[
+                    ..., :mask_length
+                ].masked_fill(padding_mask, min_dtype)
+            elif attention_mask.dim() == 4:
+                # backwards compatibility: we allow passing a 4D attention mask shorter than the input length with
+                # cache. In that case, the 4D attention mask attends to the newest tokens only.
+                if attention_mask.shape[-2] < cache_position[0] + sequence_length:
+                    offset = cache_position[0]
+                else:
+                    offset = 0
+                mask_shape = attention_mask.shape
+                mask_slice = (attention_mask.eq(0.0)).to(dtype=dtype) * min_dtype
+                causal_mask[
+                    : mask_shape[0],
+                    : mask_shape[1],
+                    offset : mask_shape[2] + offset,
+                    : mask_shape[3],
+                ] = mask_slice
+
+        if (
+            self.config._attn_implementation == "sdpa"
+            and attention_mask is not None
+            and attention_mask.device.type == "cuda"
+            and not output_attentions
+        ):
+            causal_mask = AttentionMaskConverter._unmask_unattended(
+                causal_mask, min_dtype
+            )
+
+        return causal_mask
+                            
 
     def forward(
         self,
         input_ids: torch.LongTensor = None,
         attention_mask: Optional[torch.Tensor] = None,
+        blk_mask: Optional[torch.Tensor] = None,
+        arch: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.LongTensor] = None,
         past_key_values: Optional[List[torch.FloatTensor]] = None,
         inputs_embeds: Optional[torch.FloatTensor] = None,
@@ -301,6 +598,7 @@ class Qwen2BiModel(Qwen2Model):
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
         cache_position: Optional[torch.LongTensor] = None,
+        **kwargs,
     ) -> Union[Tuple, BaseModelOutputWithPast]:
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
@@ -337,6 +635,11 @@ class Qwen2BiModel(Qwen2Model):
         if inputs_embeds is None:
             inputs_embeds = self.embed_tokens(input_ids)
 
+        arch_embeds = None
+        if arch is not None:
+            arch_embeds = self.embed_arch(arch)
+            inputs_embeds = inputs_embeds + arch_embeds
+
         if cache_position is None:
             past_seen_tokens = past_key_values.get_seq_length() if past_key_values is not None else 0
             cache_position = torch.arange(
@@ -359,6 +662,24 @@ class Qwen2BiModel(Qwen2Model):
         all_self_attns = () if output_attentions else None
         next_decoder_cache = None
 
+        ################################ for flex attntion ################################
+        
+        flex_block_mask=None
+        if self.use_flex:
+            bsz, q_len, _ = hidden_states.size()
+            causal_mask_bool = causal_mask.logical_not()[:,0,:,:].clone()
+
+            def mask_mod():
+                return causal_mask_bool[:, :, :]
+            
+            mask_flex = mask_mod()
+
+            def flex_mask(b,h,q_idx,kv_idx):
+                return mask_flex[b, q_idx, kv_idx]
+
+            flex_block_mask = create_block_mask(flex_mask, B=bsz, H=None, Q_LEN = q_len, KV_LEN = q_len)
+        ##################################################################################
+
         for decoder_layer in self.layers:
             if output_hidden_states:
                 all_hidden_states += (hidden_states,)
@@ -374,11 +695,15 @@ class Qwen2BiModel(Qwen2Model):
                     use_cache,
                     cache_position,
                     position_embeddings,
+                    arch_embeds=arch_embeds,
                 )
             else:
                 layer_outputs = decoder_layer(
                     hidden_states,
                     attention_mask=causal_mask,
+                    blk_mask=blk_mask,
+                    flex_block_mask=flex_block_mask,
+                    arch_embeds=arch_embeds,
                     position_ids=position_ids,
                     past_key_value=past_key_values,
                     output_attentions=output_attentions,
@@ -418,7 +743,7 @@ class Qwen2BiModel(Qwen2Model):
 class CustomQwen2BiForMNTP(Qwen2ForCausalLM):
     def __init__(self, config):
         Qwen2PreTrainedModel.__init__(self, config)
-        self.model = Qwen2BiModel(config)
+        self.model = CustomQwen2BiModel(config)
         self.vocab_size = config.vocab_size
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
 
@@ -430,6 +755,7 @@ class CustomQwen2BiForMNTP(Qwen2ForCausalLM):
         input_ids: torch.LongTensor = None,
         attention_mask: Optional[torch.Tensor] = None,
         blk_mask: Optional[torch.Tensor] = None,
+        arch: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.LongTensor] = None,
         past_key_values: Optional[List[torch.FloatTensor]] = None,
         inputs_embeds: Optional[torch.FloatTensor] = None,
@@ -484,6 +810,7 @@ class CustomQwen2BiForMNTP(Qwen2ForCausalLM):
             input_ids=input_ids,
             attention_mask=attention_mask,
             blk_mask=blk_mask,
+            arch=arch,
             position_ids=position_ids,
             past_key_values=past_key_values,
             inputs_embeds=inputs_embeds,
@@ -501,6 +828,10 @@ class CustomQwen2BiForMNTP(Qwen2ForCausalLM):
         loss = None
         if labels is not None:
             loss = self.loss_function(logits, labels, self.vocab_size, **loss_kwargs)
+        
+        # for name, param in self.model.named_parameters():
+        #     if param.grad is not None and torch.isnan(param.grad).any():
+        #         print(f"Gradient NaN detected in {name}")
 
         if not return_dict:
             output = (logits,) + outputs[1:]
@@ -516,10 +847,10 @@ class CustomQwen2BiForMNTP(Qwen2ForCausalLM):
 
 from models.base_embedding_model import EmbeddingMixin
 
-class Qwen2MNTPForSequenceEmbedding(Qwen2BiModel, EmbeddingMixin):
+class Qwen2MNTPForSequenceEmbedding(CustomQwen2BiModel, EmbeddingMixin):
 
     def get_hidden_state(self, input_ids, attention_mask, **kwargs):
-        return super(Qwen2BiModel, self).forward(
+        return super(CustomQwen2BiModel, self).forward(
             input_ids=input_ids, attention_mask=attention_mask, **kwargs
         ).last_hidden_state
 

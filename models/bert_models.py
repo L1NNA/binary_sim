@@ -6,7 +6,7 @@ from models.base_embedding_model import EmbeddingMixin
 class GraphCodeBERTForSequenceEmbedding(RobertaModel, EmbeddingMixin):
 
     def get_hidden_state(self, input_ids, attention_mask):
-        return super(RobertaModel, self).forward(
+        return super().forward(
             input_ids=input_ids, attention_mask=attention_mask
         ).pooler_output
     

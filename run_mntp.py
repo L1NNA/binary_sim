@@ -22,6 +22,11 @@ MODELS = {
     'codeqwen': ('Qwen/Qwen2.5-Coder-0.5B-Instruct', Qwen2BiForMNTP, "<|fim_middle|>"),
 }
 
+## python run_mntp.py --model='codeqwen' --epochs=2
+
+# BinaryCorp
+## python run_mntp.py --model='codeqwen' --epochs=2 --data_path='train_BinaryCorp' --note='BinaryCorp'
+
 class DataCollatorForMNTP(DataCollatorForLanguageModeling):
     def torch_mask_tokens(
         self,
@@ -76,12 +81,12 @@ if __name__ == "__main__":
     # data_loader
     parser.add_argument('--data_path', type=str, default='train', help='dataset path')
     parser.add_argument("--test_data_path", type=str, default='test_o0')
-    parser.add_argument("--max_seq_len", type=int, default=512,
+    parser.add_argument("--max_seq_len", type=int, default=1024,
         help="max number of tokens")
 
     # training configurations
-    parser.add_argument("--batch_size", type=int, default=4)
-    parser.add_argument("--test_batch_size", type=int, default=4)
+    parser.add_argument("--batch_size", type=int, default=2)
+    parser.add_argument("--test_batch_size", type=int, default=2)
     parser.add_argument("--resume", action='store_true', help="whether to resume training")
     parser.add_argument('--epochs', type=int, default=5, help='train epochs')
     parser.add_argument('--lr', type=float, default=0.00001, help='optimizer learning rate')
@@ -95,8 +100,17 @@ if __name__ == "__main__":
     tokenizer = AutoTokenizer.from_pretrained(
         model_path,
         trust_remote_code=True,
-        padding_side='left'
+        padding_side='left',
+        truncation_side='left',
     )
+    
+    special_tokens = ['<addr>', '<byte>', '<str>', '<BLK>']
+    tokenizer.add_special_tokens({'additional_special_tokens': special_tokens})
+    tokenizer.eos_token = '<EOS>'
+    tokenizer.sep_token = '<SEP>'
+    tokenizer.pad_token = '<PAD>'
+    tokenizer.unk_token = '<unk>'
+    
     model = model_cls.from_pretrained(
         model_path,
         torch_dtype=torch.bfloat16,
@@ -115,6 +129,8 @@ if __name__ == "__main__":
     ########## Training ##########
     # Define the training arguments
     output_dir = f'./model_checkpoints/mntp_{args.model}'
+    if args.note:
+        output_dir += '_' + args.note
     warmup_steps = int(1000/args.batch_size)
     training_args = TrainingArguments(
         output_dir=output_dir,
@@ -124,9 +140,9 @@ if __name__ == "__main__":
         warmup_steps=warmup_steps,
         weight_decay=0.01,
         learning_rate=args.lr,
-        logging_dir=join(output_dir, 'logs'),
+        # logging_dir=join(output_dir, 'logs'),
         logging_steps=250,
-        eval_strategy='epoch',     # Evaluate at the end of each epoch
+        evaluation_strategy='epoch',     # Evaluate at the end of each epoch
         save_strategy='epoch',
         load_best_model_at_end=True, # Load the best model when finished training
         metric_for_best_model=args.metric,

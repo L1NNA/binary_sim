@@ -16,18 +16,19 @@ from transformers import (
 )
 from models.llm2vec_custom import CustomQwen2BiForMNTP
 from models.llm2vec import Qwen2BiForMNTP
-from data_loaders.mntp_dataset import load_mntp_dataset
+from data_loaders.mntp_dataset import load_mntp_dataset, load_mntp_pair_dataset
 from typing import Any, Callable, Dict, List, NewType, Optional, Tuple, Union
 from collections.abc import Mapping
 from transformers.data.data_collator import pad_without_fast_tokenizer_warning, _torch_collate_batch
+from torch.nn.parallel import DistributedDataParallel as DDP
 
 MODELS = {
-    'codeqwen': ('Qwen/Qwen2.5-Coder-0.5B-Instruct', Qwen2BiForMNTP, "<|fim_middle|>"),
-    'codeqwen_uptrained': (os.path.join('model_checkpoints', 'causal_codeqwen', 'checkpoint-8672'), Qwen2BiForMNTP, "<|fim_middle|>"),
+    'codeqwen': ('Qwen/Qwen2.5-Coder-0.5B-Instruct', CustomQwen2BiForMNTP, "<|fim_middle|>"),
+    'trained_codeqwen': (os.path.join('model_checkpoints', 'causal_codeqwen', 'checkpoint-8672'), CustomQwen2BiForMNTP, "<|fim_middle|>"),
 }
 
 class DataCollatorForMNTP(DataCollatorForLanguageModeling):
-    def torch_call(self, examples: List[Union[List[int], Any, Dict[str, Any]]]) -> Dict[str, Any]:
+    def torch_call(self, examples) -> Dict[str, Any]:
             # Handle dict or lists with proper padding and conversion to tensor.
             if isinstance(examples[0], Mapping):
                 batch = pad_without_fast_tokenizer_warning(
@@ -48,7 +49,7 @@ class DataCollatorForMNTP(DataCollatorForLanguageModeling):
                 labels = batch["input_ids"].clone()
                 if self.tokenizer.pad_token_id is not None:
                     labels[labels == self.tokenizer.pad_token_id] = -100
-                batch["labels"] = labels
+            batch['blk_mask'] = (batch['input_ids'] == self.tokenizer.convert_tokens_to_ids('<BLK>')).long()
             return batch
 
     def torch_mask_tokens(
@@ -85,6 +86,8 @@ class DataCollatorForMNTP(DataCollatorForLanguageModeling):
         )
 
         return inputs, labels
+    
+
 
 
 if __name__ == "__main__":
@@ -98,18 +101,18 @@ if __name__ == "__main__":
     # loading model
     parser.add_argument('--model', help='model name',
                         choices=MODELS.keys(),
-                        default='trained_codeqwen')
+                        default='codeqwen')
     parser.add_argument("--note", type=str, default='',help="additonal note")
 
     # data_loader
     parser.add_argument('--data_path', type=str, default='train', help='dataset path')
     parser.add_argument("--test_data_path", type=str, default='test_o0')
-    parser.add_argument("--max_seq_len", type=int, default=512,
+    parser.add_argument("--max_seq_len", type=int, default=1024,
         help="max number of tokens")
 
     # training configurations
-    parser.add_argument("--batch_size", type=int, default=4)
-    parser.add_argument("--test_batch_size", type=int, default=4)
+    parser.add_argument("--batch_size", type=int, default=2)
+    parser.add_argument("--test_batch_size", type=int, default=2)
     parser.add_argument("--resume", action='store_true', help="whether to resume training")
     parser.add_argument('--epochs', type=int, default=5, help='train epochs')
     parser.add_argument('--lr', type=float, default=0.00001, help='optimizer learning rate')
@@ -137,7 +140,9 @@ if __name__ == "__main__":
     model = model_cls.from_pretrained(
         model_path,
         torch_dtype=torch.bfloat16,
-    )
+    ).to('cuda')
+    # model = nn.DataParallel(model)
+    
     
     ########## Load Data ##########
     if tokenizer.mask_token is None:
@@ -146,29 +151,42 @@ if __name__ == "__main__":
         tokenizer=tokenizer,
         mlm_probability=args.mlm_probability,
     )
-    dataset = load_mntp_dataset(tokenizer, args.max_seq_len, args.data_path)
-    val_dataset = load_mntp_dataset(tokenizer, args.max_seq_len, args.test_data_path)
+    # data_collator = lambda x: DataCollatorForMNTP1(x, tokenizer)
+
+    dataset = load_mntp_pair_dataset(tokenizer, args.max_seq_len, stage=args.data_path, max_num=200000)
+    val_dataset = load_mntp_pair_dataset(tokenizer, args.max_seq_len, stage=args.test_data_path, max_num=200000)
+    if 'blk_mask' in dataset[0].keys():
+        dataset = dataset.remove_columns(["blk_mask"])
+        val_dataset = val_dataset.remove_columns(["blk_mask"])
+
+    
+    
+    # val_dataset = load_mntp_dataset(tokenizer, args.max_seq_len, stage=args.test_data_path)
+    # dataset = load_mntp_dataset(tokenizer, args.max_seq_len, stage=args.data_path)
+    
+    
 
     ########## Training ##########
     # Define the training arguments
-    output_dir = f'./model_checkpoints/mntp_{args.model}'
+    output_dir = f'./model_checkpoints/custom_mntp_{args.model}'
     warmup_steps = int(1000/args.batch_size)
     training_args = TrainingArguments(
         output_dir=output_dir,
         num_train_epochs=args.epochs,
         per_device_train_batch_size=args.batch_size,
         per_device_eval_batch_size=args.test_batch_size,
-        lr_scheduler_type = "cosine_with_restarts",
-        lr_scheduler_kwargs = { "num_cycles": 2 },
         warmup_steps=warmup_steps,
         weight_decay=0.01,
+        # lr_scheduler_type = "cosine_with_restarts",
+        # lr_scheduler_kwargs={"num_cycles": 2},
         learning_rate=args.lr,
         logging_dir=join(output_dir, 'logs'),
         logging_steps=250,
-        evaluation_strategy='epoch',     # Evaluate at the end of each epoch
+        eval_strategy='epoch',     # Evaluate at the end of each epoch
         save_strategy='epoch',
         load_best_model_at_end=True, # Load the best model when finished training
         metric_for_best_model=args.metric,
+        # remove_unused_columns=True,
         # gradient_accumulation_steps=4,
         local_rank=int(os.environ.get("LOCAL_RANK", -1)),
     )

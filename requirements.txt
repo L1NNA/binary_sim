@@ -1,6 +1,5 @@
-transformers==4.39.3
-optimum[exporters,onnxruntime]==1.19.0
-accelerate==0.34.2
+transformers
+accelerate
 torchsummary
 peft
 scikit-learn

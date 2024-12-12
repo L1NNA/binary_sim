@@ -104,7 +104,7 @@ class CodeT5PEncoderForSequenceEmbedding(T5EncoderModel, EmbeddingMixin):
 class CodeT5PForSequenceEmbedding(T5ForConditionalGeneration, EmbeddingMixin):
 
     def get_hidden_state(self, input_ids, attention_mask):
-        outputs = super(T5ForConditionalGeneration, self).forward(
+        outputs = super().forward(
             input_ids=input_ids, attention_mask=attention_mask,
             decoder_input_ids=input_ids, decoder_attention_mask=attention_mask,
             output_hidden_states=True)

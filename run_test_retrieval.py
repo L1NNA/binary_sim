@@ -19,7 +19,7 @@ from data_loaders.test_retrieval_dataset import RetrievalDataset
 from utils.retrieval_utils import find_common_elements, get_detailed_instruct, test_retrieval
 from models.llm2vec import Qwen2MNTPForSequenceEmbedding
 from utils import get_tokens
-from models.qwen_models import Qwen2ForSequenceEmbedding
+from models.qwen_models import Qwen2ForSequenceEmbedding, CustomQwen2ForSequenceEmbedding
 from models.codet5p_models import CodeT5PEncoderForSequenceEmbedding
 from models.bert_models import GraphCodeBERTForSequenceEmbedding
 
@@ -27,8 +27,16 @@ models = {
     'qwen_emb': ('Alibaba-NLP/gte-Qwen2-1.5B-instruct', Qwen2ForSequenceEmbedding),
     'codet5p-110m-embedding': ('Salesforce/codet5p-110m-embedding', CodeT5PEncoderForSequenceEmbedding),
     'graphcodebert': ('microsoft/graphcodebert-base', GraphCodeBERTForSequenceEmbedding),
-    'qwen_llm2vec': ('Qwen/Qwen2.5-Coder-0.5B-Instruct', Qwen2MNTPForSequenceEmbedding)
+    'qwen_llm2vec': ('Qwen/Qwen2.5-Coder-0.5B-Instruct', Qwen2MNTPForSequenceEmbedding),
+    'uptrainedcodeqwen2vec': ('Qwen/Qwen2.5-Coder-0.5B-Instruct', CustomQwen2ForSequenceEmbedding),
+    'customcodeqwen2vec': ('Qwen/Qwen2.5-Coder-0.5B-Instruct', CustomQwen2ForSequenceEmbedding),
 }
+
+### python run_test_retrieval.py --model='uptrainedcodeqwen2vec' --local_model_path='model_checkpoints/simcse_uptrainedcodeqwen2vec/checkpoint-55500' --instruct=0 --get_blk_mask
+### python run_test_retrieval.py --model='uptrainedcodeqwen2vec' --local_model_path='model_checkpoints/simcse_uptrainedcodeqwen2vec/checkpoint-33750' --instruct=0 --get_blk_mask
+### python run_test_retrieval.py --model='qwen_llm2vec' --local_model_path='model_checkpoints/simcse_codeqwen2vec_uptrained/checkpoint-67500' --instruct=0 
+### python run_test_retrieval.py --model='customcodeqwen2vec' --local_model_path='model_checkpoints/simcse_customcodeqwen2vec_arch_blkmask/checkpoint-45000' --instruct=0 --get_blk_mask --note='arch_blkmask' --get_arch --attention='eager'
+### python run_test_retrieval.py --model='customcodeqwen2vec' --local_model_path='model_checkpoints/simcse_customcodeqwen2vec_blkmask/checkpoint-22500' --instruct=0 --get_blk_mask --note='blkmask' --attention='eager'
 
 def load_data(data_path, source, target, pool_size, max_lines):
     source_path = join(data_path, f'test_{source}.jsonl')
@@ -51,8 +59,8 @@ def load_data(data_path, source, target, pool_size, max_lines):
         with open(cache_file, 'wb') as f:
             pickle.dump(sampled_keys, f)
 
-    source_funcs = source_dataset.get_all(keys=sampled_keys, join_blocks=(max_lines==0))
-    target_funcs = target_dataset.get_all(keys=sampled_keys, join_blocks=(max_lines==0))
+    source_funcs = source_dataset.get_all(keys=sampled_keys)
+    target_funcs = target_dataset.get_all(keys=sampled_keys)
     return source_funcs, target_funcs
 
 def get_embeddings(
@@ -61,6 +69,8 @@ def get_embeddings(
     test_batch_size = 32,
     query_instruction = None,
     value_instruction = None,
+    get_blk_mask=False,
+    get_arch=False,
     device = 'cuda:0'
 ):
     queries, values = load_data(data_path, source, target, pool_size, max_blocks)
@@ -72,14 +82,14 @@ def get_embeddings(
     value_embs = []
     for i in trange(0, len(queries), test_batch_size, desc="Embedding queries"):
         with torch.no_grad():
-            batch_dict = get_tokens(queries[i:i+test_batch_size], tokenizer, max_blocks, max_length).to(device)
+            batch_dict = get_tokens(queries[i:i+test_batch_size], tokenizer, max_blocks, max_length, get_blk_mask=get_blk_mask, get_arch=get_arch).to(device)
             query_outputs = model(**batch_dict).embedding.cpu().float()
             query_embs.append(query_outputs)
     query_embs = torch.cat(query_embs, dim=0).view(-1, query_outputs.size(-1))
 
     for i in trange(0, len(values), test_batch_size, desc="Embedding values"):
         with torch.no_grad():
-            batch_dict = get_tokens(values[i:i+test_batch_size], tokenizer, max_blocks, max_length).to(device)
+            batch_dict = get_tokens(values[i:i+test_batch_size], tokenizer, max_blocks, max_length, get_blk_mask=get_blk_mask, get_arch=get_arch).to(device)
             value_outputs = model(**batch_dict).embedding.cpu().float()
             value_embs.append(value_outputs)
     value_embs = torch.cat(value_embs, dim=0).view(-1, value_outputs.size(-1))
@@ -95,13 +105,14 @@ if __name__ == "__main__":
     parser.add_argument("--instruct", type=int, default=0)
 
     # === model ===
-    parser.add_argument("--model", choices=models.keys(), default='jina_emb', help="The model name")
+    parser.add_argument("--model", choices=models.keys(), default='uptrainedcodeqwen2vec', help="The model name")
     parser.add_argument("--local_model_path", type=str,)
     parser.add_argument("--local_tokenizer_path", type=str)
+    parser.add_argument("--note", type=str)
 
     # === data ===
     parser.add_argument(
-        "--test_batch_size", type=int, default=32,
+        "--test_batch_size", type=int, default=64,
         help="The batch size."
     )
     parser.add_argument(
@@ -120,23 +131,47 @@ if __name__ == "__main__":
         "--data_path", type=str, default=join(os.getcwd(), 'datasets'),
         help="path to the datasets"
     )
+    parser.add_argument(
+        "--get_blk_mask", action='store_true',
+        help="use blk mask in input"
+    )
+    parser.add_argument(
+        "--get_arch", action='store_true',
+        help="use arch embedding"
+    )
+    parser.add_argument("--attention", type=str, help="attention type, leave empty for default sdpa or eager for custom")
     # Parse the arguments
     args = parser.parse_args()
     
+    if args.local_model_path is None and args.model == 'uptrainedcodeqwen2vec':
+        args.local_model_path = os.path.join('model_checkpoints', 'simcse_uptrainedcodeqwen2vec', 'checkpoint-55500')
 
     # ================= Load Model ======================
     model_path, model_cls = models[args.model]
+    config = AutoModel.from_pretrained(model_path).config
+    if args.attention:
+        config._attn_implementation = args.attention
+
     model = model_cls.from_pretrained(
         model_path if args.local_model_path is None else args.local_model_path,
         # device_map='auto',
-        torch_dtype=torch.bfloat16
+        torch_dtype=torch.bfloat16,
+        config=config,
     ).to('cuda:0')
     model = nn.DataParallel(model)
     tokenizer = AutoTokenizer.from_pretrained(
         model_path if args.local_tokenizer_path is None else args.local_tokenizer_path,
         trust_remote_code=True,
-        padding_side='left'
+        padding_side='left',
+        truncation_side='left',
     )
+
+    special_tokens = ['<addr>', '<byte>', '<str>', '<BLK>']
+    tokenizer.add_special_tokens({'additional_special_tokens': special_tokens})
+    tokenizer.eos_token = '<EOS>'
+    tokenizer.sep_token = '<SEP>'
+    tokenizer.pad_token = '<PAD>'
+    tokenizer.unk_token = '<unk>'
     
     # ================= Embedding ======================
     optimizations = ['o0', 'o1', 'o2', 'o3']
@@ -145,11 +180,11 @@ if __name__ == "__main__":
     architectures = ['arm', 'powerpc', 'x86_32', 'x86_64', 'mips']
     
     os.makedirs(join('./results', 'reterival'), exist_ok=True)
-    result_file = join('./results', 'reterival', f'{args.model}-{args.instruct}_{args.pool_size}.csv')
+    result_file = join('./results', 'reterival', f'{args.model}-{args.instruct}_{args.pool_size}_{args.note}.csv')
     with open(result_file, 'w') as f:
         f.write('source, dest, mrr, recall@1, recall@10\n')
 
-    combinations = itertools.permutations(optimizations, 2)
+    combinations = itertools.combinations(optimizations, 2)
     for o1, o2 in combinations:
         instruction = None
         if args.instruct == 1:
@@ -159,12 +194,14 @@ if __name__ == "__main__":
             model, tokenizer,
             args.data_path, o1, o2, args.pool_size, args.max_length, args.max_blocks,
             args.test_batch_size, instruction,
+            get_blk_mask=args.get_blk_mask,
+            get_arch=args.get_arch,
         )
         print(f'Finished testing reterival optimization {o1} to optimization {o2}', metrics)
         with open(result_file, 'a') as f:
             f.write(f"{o1}, {o2}, {metrics['mrr']}, {metrics['recall_at_1']}, {metrics['recall_at_10']}\n")
 
-    combinations = itertools.permutations(obfuscations, 2)
+    combinations = itertools.combinations(obfuscations, 2)
     for o1, o2 in combinations:
         instruction = None
         if args.instruct == 1:
@@ -174,12 +211,14 @@ if __name__ == "__main__":
             model, tokenizer,
             args.data_path, o1, o2, args.pool_size, args.max_length, args.max_blocks,
             args.test_batch_size, instruction,
+            get_blk_mask=args.get_blk_mask,
+            get_arch=args.get_arch,
         )
         print(f'Finished testing reterival obfuscation {o1} to obfuscation {o2}', metrics)
         with open(result_file, 'a') as f:
             f.write(f"{o1}, {o2}, {metrics['mrr']}, {metrics['recall_at_1']}, {metrics['recall_at_10']}\n")
 
-    combinations = itertools.permutations(compilers, 2)
+    combinations = itertools.combinations(compilers, 2)
     for c1, c2 in combinations:
         instruction = None
         if args.instruct == 1:
@@ -189,12 +228,14 @@ if __name__ == "__main__":
             model, tokenizer,
             args.data_path, c1, c2, args.pool_size, args.max_length, args.max_blocks,
             args.test_batch_size, instruction,
+            get_blk_mask=args.get_blk_mask,
+            get_arch=args.get_arch,
         )
         print(f'Finished testing reterival compiler {c1} to compiler {c2}', metrics)
         with open(result_file, 'a') as f:
             f.write(f"{c1}, {c2}, {metrics['mrr']}, {metrics['recall_at_1']}, {metrics['recall_at_10']}\n")
 
-    combinations = itertools.permutations(architectures, 2)
+    combinations = itertools.combinations(architectures, 2)
     for a1, a2 in combinations:
         instruction = None
         if args.instruct == 1:
@@ -204,6 +245,8 @@ if __name__ == "__main__":
             model, tokenizer,
             args.data_path, a1, a2, args.pool_size, args.max_length, args.max_blocks,
             args.test_batch_size, instruction,
+            get_blk_mask=args.get_blk_mask,
+            get_arch=args.get_arch,
         )
         print(f'Finished testing reterival architecture {a1} to architecture {a2}', metrics)
         with open(result_file, 'a') as f:

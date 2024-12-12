@@ -2,6 +2,70 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from utils.distributed_utils import mismatched_sizes_all_gather
+
+
+def info_nce(x_emb, y_emb, scale):
+    batch_size = x_emb.size(0)
+    # Compute cross cosine similarities: batch_size x batch_size
+    similarities = F.cosine_similarity(x_emb.unsqueeze(1), \
+        y_emb.unsqueeze(0), dim=2) * scale
+    labels = torch.arange(batch_size).to(x_emb.device)
+    return similarities, labels
+
+
+def gte_loss(x_emb, y_emb, scale):
+    
+    batch_size = x_emb.size(0)
+    labels = torch.arange(batch_size, device=x_emb.device)
+    xiy = F.cosine_similarity(x_emb.unsqueeze(1), \
+        y_emb.unsqueeze(0), dim=2)
+    yix = F.cosine_similarity(y_emb.unsqueeze(1), \
+        x_emb.unsqueeze(0), dim=2)
+    yix[labels, labels] = -torch.inf
+    xix = F.cosine_similarity(x_emb.unsqueeze(1), \
+        x_emb.unsqueeze(0), dim=2)
+    xix[labels, labels] = -torch.inf
+    yiy = F.cosine_similarity(y_emb.unsqueeze(1), \
+        y_emb.unsqueeze(0), dim=2)
+    yiy[labels, labels] = -torch.inf
+    
+    similarities = torch.cat([
+        xiy, yix, xix, yiy
+    ], dim=1)
+    return similarities, labels
+    
+    
+class SimeCSELoss:
+    def __init__(
+        self,
+        sim_func=gte_loss,
+        temperature:float=0.05,
+    ):
+        self.scale = 1 / temperature
+        self.sim_func = sim_func
+        self.cross_entropy_loss = nn.CrossEntropyLoss()
+
+    def __call__(
+        self,
+        x_embs,
+        y_embs
+    ):
+        if torch.distributed.is_initialized():
+            full_x_embs = mismatched_sizes_all_gather(x_embs)
+            full_x_embs = torch.cat(full_x_embs)
+
+            full_y_embs = mismatched_sizes_all_gather(y_embs)
+            full_y_embs = torch.cat(full_y_embs)
+        else:
+            full_x_embs = x_embs
+            full_y_embs = y_embs
+
+        similarities, labels = self.sim_func(full_x_embs, full_y_embs, self.scale)
+        loss = self.cross_entropy_loss(similarities, labels)
+        return loss
+
+
 def info_nce(x_emb, y_emb, labels=None, temperature=0.05):
     batch_size = x_emb.size(0)
     # Compute cross cosine similarities: batch_size x batch_size
@@ -15,6 +79,20 @@ def info_nce(x_emb, y_emb, labels=None, temperature=0.05):
         logits.masked_fill_(mask, -torch.inf)
     diag_labels = torch.arange(batch_size).to(labels.device)
     return F.cross_entropy(logits, diag_labels)
+
+def gte_info_nce(x_emb, y_emb, labels=None, temperature=0.01):
+    batch_size = x_emb.size(0)
+    # concat two embs and cross sim
+    embs = torch.cat([x_emb, y_emb], dim=0)
+    cross_sims = F.cosine_similarity(embs.unsqueeze(1), \
+        embs.unsqueeze(0), dim=2) / temperature
+    # mask diagonal with -torch.inf i.e. mask q_i,q_i and d_i,d_i
+    diag_indices = torch.arange(2*batch_size, device=x_emb.device)
+    cross_sims[diag_indices, diag_indices] = -torch.inf
+    # concat qiqj, qidj, diqj, didj, for some 1 and all j
+    cross_sims = torch.cat([cross_sims[:batch_size, :], cross_sims[batch_size:, batch_size:]], dim=1)
+    labels = torch.arange(batch_size, batch_size*2, device=x_emb.device)
+    return F.cross_entropy(cross_sims, labels)
 
 
 def cosine_similarity(x_emb, y_emb, labels):

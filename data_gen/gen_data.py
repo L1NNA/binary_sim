@@ -8,7 +8,7 @@ from tqdm import trange, tqdm
 import re
 import numpy as np
 import torch
-from varname import nameof
+# from varname import nameof
 
 ## oprs filter
 oprs_filter = (
@@ -72,7 +72,8 @@ def find_pattern(p, string):
 
 ### process a function into a blocks of sequences
 def func2blocks(func, data, file_name = None, add_token = True, stage = None):
-    if file_name is not None and add_token == True and stage=='training':
+    # if file_name is not None and add_token == True and stage=='training':
+    if file_name is not None and add_token == True:
         f_name = file_name.split('/')[-1]
         opt_pattern = r'(o0|o1|o2|o3|os|O0|O1|O2|O3|Os)'
         opt_token = find_pattern(opt_pattern, file_name)
@@ -104,7 +105,7 @@ def func2blocks(func, data, file_name = None, add_token = True, stage = None):
         block_ins = ' '.join([ins2seq(ins) for ins in block['ins']])
         if block_ins != "": # filter out empty block
             blocks.append(block_ins)
-    if file_name is not None and add_token == True and stage=='training':
+    if file_name is not None and add_token == True:
         blocks.append(f'{opt_token.lower()}{compiler_token.lower()}{arch_token.lower()}{obf_token.lower()}')
     return blocks
 
@@ -166,7 +167,7 @@ def main():
 #     print("Finish training data generation")
     
     
-#     # get testing files for cross-opt
+    # get testing files for cross-opt
 #     path_opt = 'libraries/data/optimization-amd64'
 #     for lib in tqdm(['gmp','libtomcrypt','openssl']):
 #         files = os.listdir(os.path.join(path_opt, lib))
@@ -291,8 +292,8 @@ def main():
 #             f.write(json.dumps(js) + '\n')
 #     print("Finish cross-compiler data generation")
 
-    ### generate training set with cfg for baselines
-    train_cfg = []
+#     ### generate training set with cfg for baselines
+#     train_cfg = []
 #     path_train = 'datasets/firmware_images'
 #     libs = [
 #         'l-busybox-busybox_unstripped', 'l-sqlite-sqlite3',
