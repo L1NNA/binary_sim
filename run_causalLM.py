@@ -30,7 +30,7 @@ models = {
 }
 
 
-if __name__ == "__main__":
+def main():
     # Create the parser
     parser = argparse.ArgumentParser()
 
@@ -42,6 +42,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "--test_batch_size", type=int, default=2,
         help="The batch size."
+    )
+    parser.add_argument(
+        "--data", type=str, default='train_BinaryCorp'
     )
     parser.add_argument(
         "--model", choices=models.keys(), default='codeqwen',
@@ -56,7 +59,7 @@ if __name__ == "__main__":
         help="max number of tokens per line"
     )
     parser.add_argument(
-        "--max_pairs", type=int, default=200000,
+        "--max_pairs", type=int, default=100000,
         help="max number of tokens per line"
     )
     parser.add_argument(
@@ -64,7 +67,7 @@ if __name__ == "__main__":
         help="resume"
     )
     parser.add_argument(
-        "--epochs", type=int, default=5,
+        "--epochs", type=int, default=2,
         help="number of epochs"
     )
     # Parse the arguments
@@ -98,12 +101,13 @@ if __name__ == "__main__":
 
     ########## Load Data ##########
     path = os.path.join(os.getcwd(), 'datasets')
-    path = os.path.join(path, 'train.jsonl')
+    path = os.path.join(path, f'{args.data}.jsonl')
     dataset = CausalDatasetPair(path, max_line=args.max_lines, max_num=args.max_pairs)
     total_length = len(dataset)
     train_length = int(total_length * 0.9)
     val_length = total_length - train_length
     train_dataset, val_dataset = random_split(dataset, [train_length, val_length])
+    
     
     
     ########## Load Model #########
@@ -144,7 +148,7 @@ if __name__ == "__main__":
     ########## Training ##########
     # Define the training arguments
     current_time = datetime.now().strftime("%Y-%m-%d_%H-%M")
-    output_dir = f'./model_checkpoints/causal_{args.model}'
+    output_dir = f'./model_checkpoints/causal_{args.model}_{args.data}'
     warmup_steps = int(1000/args.batch_size)
     training_args = TrainingArguments(
         output_dir=output_dir,
@@ -155,7 +159,7 @@ if __name__ == "__main__":
         warmup_steps=warmup_steps,
         gradient_accumulation_steps=4,
         weight_decay=0.01,
-        learning_rate=0.00005,
+        learning_rate=1e-5,
         logging_dir=join(output_dir, 'logs', current_time),
         logging_steps=250,
         # eval_steps=1000,
@@ -188,3 +192,5 @@ if __name__ == "__main__":
     ########## Inference ##########
     # print(compute_metrics(trainer.predict(test_dataset), join(output_dir, 'test.json')))
 
+if __name__ == "__main__":
+    main()

@@ -12,7 +12,7 @@ import torch
 
 
 def load_mntp_dataset(tokenizer, max_length, stage='train'):
-    tokenized_path = os.path.join('datasets', f'{stage}_tokenized_{max_length}')
+    tokenized_path = os.path.join('datasets', f'{stage}_tokenized')
     if exists(tokenized_path):
         tokenized_dataset = load_from_disk(tokenized_path)
     else:
@@ -34,7 +34,7 @@ def load_mntp_dataset(tokenizer, max_length, stage='train'):
     return tokenized_dataset
 
 def load_mntp_pair_dataset(tokenizer, max_length, max_blocks = 0, stage='train', max_num=50000):
-    tokenized_path = os.path.join('datasets', f'{stage}_pair_tokenized_{max_length}')
+    tokenized_path = os.path.join('datasets', f'{stage}_pair_tokenized_{max_length}_{max_num}')
     if exists(tokenized_path):
         tokenized_dataset = load_from_disk(tokenized_path)
     else:
@@ -50,7 +50,6 @@ def load_mntp_pair_dataset(tokenizer, max_length, max_blocks = 0, stage='train',
                 bins[js.function].append(i)
                 i += 1
 
-        blk_token = tokenizer.convert_tokens_to_ids('<BLK>')
         results = {'functions': []}
         keys = [key for key in bins.keys() if len(bins[key]) >= 2]
         for _ in trange(max_num, desc=f'Sampling dataset'):
@@ -82,6 +81,8 @@ def load_mntp_pair_dataset(tokenizer, max_length, max_blocks = 0, stage='train',
             input_ids =[]
             attention_mask = []
             blk_mask = []
+
+            source = [i+' ' for i in source]
 
             inputs_source = tokenizer(source, truncation=True, max_length=int(max_length//2))
             inputs_target = tokenizer(target, truncation=True, max_length=int(max_length//2))

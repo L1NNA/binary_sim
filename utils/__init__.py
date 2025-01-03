@@ -143,6 +143,10 @@ class BinFunc:
     
     def get_blocks(self, max_blocks=0, use_blk_token = True, remove_last=False) -> str:
         blocks = self.blocks
+        if type(blocks) is str:
+            if remove_last:
+                return ' '.join(blocks.split()[:-1])
+            return blocks
         if remove_last:
             blocks = blocks[:-1]
         # move the tokens containing arch, opt, compiler, etc.. to the beginning for target sentence in paired causal training 

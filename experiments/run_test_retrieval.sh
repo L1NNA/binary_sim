@@ -1,4 +1,5 @@
-export CUDA_VISIBLE_DEVICES=0,4,5
+export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
+export OMP_NUM_THREADS=4
 
 # python run_test_retrieval.py \
 #     --model 'codet5p-110m-embedding' --local_model_path "./model_checkpoints/simcse_codet5p-110m-embedding/checkpoint-1608" \
@@ -14,5 +15,5 @@ export CUDA_VISIBLE_DEVICES=0,4,5
 
     
 python run_test_retrieval.py \
-    --model 'graphcodebert' --local_model_path "./model_checkpoints/simcse_graphcodebert/checkpoint-2345" \
-    --max_length 512 --test_batch_size 32
+    --model 'qwen_emb' \
+    --max_length 512 --test_batch_size 32 --note "zero-shot"

@@ -11,13 +11,17 @@ from dataclasses import dataclass
 
 from layers.pooling import cls_pooling, mean_pooling, mask_mean_pooling, attention_mask_pooling
 from layers.loss import info_nce, gte_info_nce
+from transformers import logging
 
+logger = logging.get_logger(__name__)
 
 @dataclass
 class EmbeddingOutput(ModelOutput):
     loss: Optional[torch.FloatTensor] = None
     embedding: torch.FloatTensor = None
     y_embedding: torch.FloatTensor = None
+    all_hidden_states: Optional[torch.FloatTensor] = None
+    last_hidden: Optional[torch.FloatTensor] = None
 
 
 class EmbeddingMixin:
@@ -25,8 +29,8 @@ class EmbeddingMixin:
     def get_hidden_state(self, input_ids, attention_mask, **kwargs):
         raise 'Not implemented'
     
-    def get_pooling(self, hidden_state, attention_mask, **kwargs):
-        pooling = getattr(self.config, 'pooling', 'mean')
+    def get_pooling(self, hidden_state, attention_mask, blk_mask=None, **kwargs):
+        pooling = getattr(self.config, 'pooling', 'mask_mean')
         
         if pooling == 'mean':
             return mean_pooling(hidden_state)
@@ -36,6 +40,14 @@ class EmbeddingMixin:
             return attention_mask_pooling(hidden_state, attention_mask)
         elif pooling == 'mask_mean':
             return mask_mean_pooling(hidden_state, attention_mask)
+        elif pooling == 'blk_mask_mean':
+            if blk_mask is not None:
+                return mask_mean_pooling(hidden_state, attention_mask*blk_mask)
+            else:
+                logger.warning_once(
+                    "you specified pooling to be 'blk_mask_mean' without providing blk_mask, using mask mean pooling instead"
+                )
+                return mask_mean_pooling(hidden_state, attention_mask)
         else:
             raise f'Unsupported pooling: {pooling}'
         
@@ -53,20 +65,25 @@ class EmbeddingMixin:
                   y_attention_mask=None, 
                   y_arch=None,
                   labels=None,
-                   ):
-        hidden_state = self.get_hidden_state(input_ids, attention_mask, blk_mask=blk_mask, arch=arch)
+    ):
+        result = self.get_hidden_state(input_ids, attention_mask, blk_mask=blk_mask, arch=arch)
+        hidden_state = result.last_hidden_state
+        all_hidden_states = result.hidden_states if 'hidden_states' in result else None
         x_emb = self.get_pooling(hidden_state, attention_mask, blk_mask=blk_mask)
 
         y_emb = None
         if y_input_ids is not None:
-            hidden_state = self.get_hidden_state(y_input_ids, y_attention_mask, blk_mask=y_blk_mask, arch=y_arch)
+            result = self.get_hidden_state(y_input_ids, y_attention_mask, blk_mask=y_blk_mask, arch=y_arch)
+            hidden_state = result.last_hidden_state
             y_emb = self.get_pooling(hidden_state, y_attention_mask, blk_mask=y_blk_mask)
 
         loss = self.get_loss(x_emb, y_emb, labels)
         return EmbeddingOutput(
             loss=loss,
             embedding=x_emb,
-            y_embedding=y_emb
+            y_embedding=y_emb,
+            all_hidden_states=all_hidden_states,
+            last_hidden = hidden_state,
         )
     
     def embeddingWithUnsupervised(self, input_ids, 

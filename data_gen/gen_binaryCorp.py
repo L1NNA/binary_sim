@@ -79,38 +79,38 @@ def process_func(opt,  func_name = None, file_name = None):
 
 def generate_single(list_of_files, stage):
     
-#     if stage != 'training':
-#         for _file in tqdm(list_of_files, f'Parsing {stage} files'):
-#             ## _file is a dict, with key being the function name, and value is a list of 5 element, with each element being a opt level
-#             try:
-#                 data = get_data(_file)
-#                 for key, value in data.items():  ## loop through functions
-#                     function_name = key
-#                     code = process_func(value, func_name = function_name, file_name = _file)
-#                     result = {'function': function_name, 'blocks': code, 'file': _file}
-#                     yield result
-                    
-#             except Exception as e:
-#                 print(_file, e)
-
-#     else: 
+    # if stage != 'training':
     for _file in tqdm(list_of_files, f'Parsing {stage} files'):
         ## _file is a dict, with key being the function name, and value is a list of 5 element, with each element being a opt level
         try:
             data = get_data(_file)
             for key, value in data.items():  ## loop through functions
                 function_name = key
-                for opt in value:
-                    ### no additional opt token during testing?
-                    code = process_func(opt, func_name = function_name, file_name = _file)
-                    result = {'function': function_name, 'blocks': code, 'file': _file}
-                    yield result
-                # if require_cfg:
-                #     cfg = calls2cfg(function, data)
-                #     result['cfg'] = cfg
-                # yield result
+                code = process_func(value, func_name = function_name, file_name = _file)
+                result = {'function': function_name, 'blocks': code, 'file': _file}
+                yield result
+
         except Exception as e:
             print(_file, e)
+
+#     else: 
+    # for _file in tqdm(list_of_files, f'Parsing {stage} files'):
+    #     ## _file is a dict, with key being the function name, and value is a list of 5 element, with each element being a opt level
+    #     try:
+    #         data = get_data(_file)
+    #         for key, value in data.items():  ## loop through functions
+    #             function_name = key
+    #             for opt in value:
+    #                 ### no additional opt token during testing?
+    #                 code = process_func(opt, func_name = function_name, file_name = _file)
+    #                 result = {'function': function_name, 'blocks': code, 'file': _file}
+    #                 yield result
+    #             # if require_cfg:
+    #             #     cfg = calls2cfg(function, data)
+    #             #     result['cfg'] = cfg
+    #             # yield result
+    #     except Exception as e:
+    #         print(_file, e)
 
     
 def main():
@@ -118,7 +118,7 @@ def main():
     # generate training
     path_train = "datasets/BinaryCorp/small_train/**"
     training = glob.glob(path_train, recursive=True)
-    training = [i for i in training if 'saved_index.pkl' in i]
+    training = [i for i in training if not 'saved_index.pkl' in i and 'pkl' in i]
     
     print("Generating training data...")
     with open('datasets/train_BinaryCorp.jsonl', 'a') as f:

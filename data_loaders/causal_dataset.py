@@ -29,6 +29,7 @@ class CausalDatasetPair(Dataset):
         self.bins = defaultdict(list)
         self.max_line = max_line
         self.pairs = []
+        self.bincorp = True if 'Binary' in path else False
         with open(path) as f:
             i = 0
             for line in tqdm(f, desc=f'Loading dataset'):
@@ -60,7 +61,7 @@ class CausalDatasetPair(Dataset):
         y_js = self.pairs[y_index]
         x = x_js.get_blocks(self.max_line)
         y = y_js.get_blocks(self.max_line, remove_last = True)
-        last_block_y = y_js.blocks[-1]
+        last_block_y = y_js.blocks[-1] if not self.bincorp else y_js.blocks.split()[-1]
         if self.max_line == 0:
             x += ' <SEP> '+last_block_y
             y += ' <EOS>'

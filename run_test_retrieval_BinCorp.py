@@ -32,14 +32,7 @@ models = {
     'customcodeqwen2vec': ('Qwen/Qwen2.5-Coder-0.5B-Instruct', CustomQwen2ForSequenceEmbedding),
 }
 
-### python run_test_retrieval.py --model='uptrainedcodeqwen2vec' --local_model_path='model_checkpoints/simcse_uptrainedcodeqwen2vec/checkpoint-55500' --instruct=0 --get_blk_mask
-### python run_test_retrieval.py --model='uptrainedcodeqwen2vec' --local_model_path='model_checkpoints/simcse_uptrainedcodeqwen2vec/checkpoint-33750' --instruct=0 --get_blk_mask
-### python run_test_retrieval.py --model='qwen_llm2vec' --local_model_path='model_checkpoints/simcse_codeqwen2vec_uptrained/checkpoint-67500' --instruct=0 
-### python run_test_retrieval.py --model='customcodeqwen2vec' --local_model_path='model_checkpoints/simcse_customcodeqwen2vec_arch_blkmask/checkpoint-45000' --instruct=0 --get_blk_mask --note='arch_blkmask' --get_arch --attention='eager'
-### python run_test_retrieval.py --model='customcodeqwen2vec' --local_model_path='model_checkpoints/simcse_customcodeqwen2vec_blkmask/checkpoint-22500' --instruct=0 --get_blk_mask --note='blkmask' --attention='eager'
-### python run_test_retrieval.py --model='customcodeqwen2vec' --local_model_path='model_checkpoints/simcse_customcodeqwen2vec_uptrained_blk/checkpoint-34688' --get_blk_mask --note='uptrained_blk' --attention='eager'
-'BEST PERFORMING ONE'
-###python run_test_retrieval.py --model='customcodeqwen2vec' --local_model_path='model_checkpoints/simcse_customcodeqwen2vec_uptrained/checkpoint-34688' --note='uptrained' 
+### python run_test_retrieval_BinCorp.py --model='customcodeqwen2vec' --local_model_path='model_checkpoints/simcse_customcodeqwen2vec_BinaryCorp/checkpoint-10000'
 
 def load_data(data_path, source, target, pool_size, max_lines):
     source_path = join(data_path, f'test_{source}.jsonl')
@@ -112,6 +105,7 @@ if __name__ == "__main__":
     parser.add_argument("--local_model_path", type=str,)
     parser.add_argument("--local_tokenizer_path", type=str)
     parser.add_argument("--note", type=str)
+    parser.add_argument("--prompt", action="store_true", help="use prompt")
 
     # === data ===
     parser.add_argument(
@@ -127,7 +121,7 @@ if __name__ == "__main__":
         help="max number of tokens per line"
     )
     parser.add_argument(
-        "--pool_size", type=int, default=1000,
+        "--pool_size", type=int, default=10000,
         help="pool size for retrieval"
     )
     parser.add_argument(
@@ -150,9 +144,6 @@ if __name__ == "__main__":
     parser.add_argument("--use_flex", action="store_true", help="use flex attention")
     # Parse the arguments
     args = parser.parse_args()
-    
-    if args.local_model_path is None and args.model == 'uptrainedcodeqwen2vec':
-        args.local_model_path = os.path.join('model_checkpoints', 'simcse_uptrainedcodeqwen2vec', 'checkpoint-55500')
 
     # ================= Load Model ======================
     model_path, model_cls = models[args.model]
@@ -192,13 +183,10 @@ if __name__ == "__main__":
     tokenizer.unk_token = '<unk>'
     
     # ================= Embedding ======================
-    optimizations = ['o0', 'o1', 'o2', 'o3']
-    obfuscations = ['obf_all', 'obf_none', 'obf_sub', 'obf_fla', 'obf_bcf']
-    compilers = ['clang', 'gcc']
-    architectures = ['arm', 'powerpc', 'x86_32', 'x86_64', 'mips']
+    optimizations = ['o0_BinaryCorp', 'o1_BinaryCorp', 'o2_BinaryCorp', 'o3_BinaryCorp', 'os_BinaryCorp']
     
-    os.makedirs(join('./results', 'reterival'), exist_ok=True)
-    result_file = join('./results', 'reterival', f'{args.model}-{args.instruct}_{args.pool_size}_{args.note}.csv')
+    os.makedirs(join('./results', 'retrieval_BinaryCorp'), exist_ok=True)
+    result_file = join('./results', 'retrieval_BinaryCorp', f'{args.model}-{args.instruct}_{args.pool_size}_{args.note}.csv')
     with open(result_file, 'w') as f:
         f.write('source, dest, mrr, recall@1, recall@10\n')
 
@@ -206,7 +194,7 @@ if __name__ == "__main__":
     for o1, o2 in combinations:
         instruction = None
         if args.instruct == 1:
-            instruction = f'translate the following binary code in optimization {o1} to optimization {o2}'
+            instruction = f'provide the semantics for the following assembly function, which is compiled with the setting: '
         print(f'Testing reterival optimization {o1} to optimization {o2}')
         metrics = get_embeddings(
             model, tokenizer,
@@ -219,55 +207,4 @@ if __name__ == "__main__":
         with open(result_file, 'a') as f:
             f.write(f"{o1}, {o2}, {metrics['mrr']}, {metrics['recall_at_1']}, {metrics['recall_at_10']}\n")
 
-    combinations = itertools.combinations(obfuscations, 2)
-    for o1, o2 in combinations:
-        instruction = None
-        if args.instruct == 1:
-            instruction = f'translate the following binary code obfuscated by {o1} to obfuscation {o2}'
-        print(f'Testing reterival obfuscation {o1} to obfuscation {o2}')
-        metrics = get_embeddings(
-            model, tokenizer,
-            args.data_path, o1, o2, args.pool_size, args.max_length, args.max_blocks,
-            args.test_batch_size, instruction,
-            get_blk_mask=args.get_blk_mask,
-            get_arch=args.get_arch,
-        )
-        print(f'Finished testing reterival obfuscation {o1} to obfuscation {o2}', metrics)
-        with open(result_file, 'a') as f:
-            f.write(f"{o1}, {o2}, {metrics['mrr']}, {metrics['recall_at_1']}, {metrics['recall_at_10']}\n")
-
-    combinations = itertools.combinations(compilers, 2)
-    for c1, c2 in combinations:
-        instruction = None
-        if args.instruct == 1:
-            instruction = f'translate the following binary code compiled by {c1} to compiler {c2}'
-        print(f'Testing reterival compiler {c1} to compiler {c2}')
-        metrics = get_embeddings(
-            model, tokenizer,
-            args.data_path, c1, c2, args.pool_size, args.max_length, args.max_blocks,
-            args.test_batch_size, instruction,
-            get_blk_mask=args.get_blk_mask,
-            get_arch=args.get_arch,
-        )
-        print(f'Finished testing reterival compiler {c1} to compiler {c2}', metrics)
-        with open(result_file, 'a') as f:
-            f.write(f"{c1}, {c2}, {metrics['mrr']}, {metrics['recall_at_1']}, {metrics['recall_at_10']}\n")
-
-    combinations = itertools.combinations(architectures, 2)
-    for a1, a2 in combinations:
-        instruction = None
-        if args.instruct == 1:
-            instruction = f'translate the following binary code in architecture {a1} to architecture {a2}'
-        print(f'Testing reterival architecture {a1} to architecture {a2}')
-        metrics = get_embeddings(
-            model, tokenizer,
-            args.data_path, a1, a2, args.pool_size, args.max_length, args.max_blocks,
-            args.test_batch_size, instruction,
-            get_blk_mask=args.get_blk_mask,
-            get_arch=args.get_arch,
-        )
-        print(f'Finished testing reterival architecture {a1} to architecture {a2}', metrics)
-        with open(result_file, 'a') as f:
-            f.write(f"{a1}, {a2}, {metrics['mrr']}, {metrics['recall_at_1']}, {metrics['recall_at_10']}\n")
-    
     

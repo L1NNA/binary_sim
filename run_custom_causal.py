@@ -113,6 +113,7 @@ if __name__ == "__main__":
     val_length = total_length - train_length
     # split the dataset
     train_dataset, val_dataset = random_split(dataset, [train_length, val_length])
+    
 
 
     ################# Train a sentencepiece tokenizer #################

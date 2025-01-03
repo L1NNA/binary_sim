@@ -54,7 +54,7 @@ class BinSimDataset(Dataset):
         return x_js.get_blocks(self.max_lines), y_js.get_blocks(self.max_lines), label
     
     
-def pairwise_collate(batch, tokenizer, max_blocks, max_length=64, require_blk_mask = False, arch_embed=False, padding = True):
+def pairwise_collate(batch, tokenizer, max_blocks, max_length=512, require_blk_mask = False, arch_embed=False, padding = True):
     x_batches, y_batches, labels = zip(*batch)
     blk_token = tokenizer.convert_tokens_to_ids('<BLK>')
 
@@ -96,4 +96,5 @@ def pairwise_collate(batch, tokenizer, max_blocks, max_length=64, require_blk_ma
         # last_blocks = [' '.join(i.split()[-5:]) for i in y_batches]
         # pattern = [find_pattern(arch_pattern, i)[1:] for i in last_blocks]
         # result['y_arch'] = torch.tensor([map[i] for i in pattern]).reshape(-1, 1).expand(-1, result['y_input_ids'].size(-1)).clone()
+    # print(result['blk_mask'].shape)
     return result

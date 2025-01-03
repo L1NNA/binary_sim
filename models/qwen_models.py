@@ -47,15 +47,19 @@ class CustomQwen2ForSequenceEmbedding(CustomQwen2BiModel, EmbeddingMixin):
     def __init__(self, config):
         super().__init__(config)
         self.use_unsupervised = getattr(config, 'use_unsupervised', False)
+        self.pooling = getattr(config, 'pooling', 'mask_mean')
 
     def get_hidden_state(self, input_ids, attention_mask, blk_mask=None, arch=None):
-        return super().forward(
+        result = super().forward(
             input_ids=input_ids, 
             attention_mask=attention_mask, 
             blk_mask=blk_mask,
             dropout = 0.1,
             arch=arch,
-        ).last_hidden_state
+            output_hidden_states=True if not self.training else False,
+        )
+        # return result.last_hidden_state
+        return result
 
     def forward(self, input_ids, 
                 attention_mask, 
@@ -90,12 +94,6 @@ class CustomQwen2ForSequenceEmbedding(CustomQwen2BiModel, EmbeddingMixin):
                 y_arch=y_arch,
                 labels=labels,
             )
-    
-    def get_pooling(self, hidden_state, attention_mask, blk_mask=None):
-        return attention_mask_pooling(hidden_state, attention_mask)
-        # if blk_mask is not None:
-        #     mask = attention_mask * blk_mask
-        # return mask_mean_pooling(hidden_state, mask)
     
     def get_loss(self, x_emb, y_emb, labels, anchor_emb=None):
         if y_emb is None:

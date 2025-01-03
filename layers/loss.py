@@ -77,10 +77,21 @@ def info_nce(x_emb, y_emb, labels=None, temperature=0.05):
         mask = labels.unsqueeze(0).repeat(batch_size, 1) == labels.unsqueeze(1)
         torch.diagonal(mask).fill_(False)
         logits.masked_fill_(mask, -torch.inf)
-    diag_labels = torch.arange(batch_size).to(labels.device)
+    diag_labels = torch.arange(batch_size).to(x_emb.device)
     return F.cross_entropy(logits, diag_labels)
 
-def gte_info_nce(x_emb, y_emb, labels=None, temperature=0.01):
+def align_loss(x, y, alpha=2):
+    return (x - y).norm(p=2, dim=1).pow(alpha).mean()
+
+def uniform_loss(x, t=2):
+    return torch.pdist(x, p=2).pow(2).mul(-t).exp().mean().log()
+
+def cov_loss(x):
+    cov = torch.cov(x.transpose(0,1))
+    l_cov = torch.norm(cov - torch.eye(cov.size(0)).to(x.device), p='fro')
+    return l_cov.to(x.device)
+
+def gte_info_nce(x_emb, y_emb, labels=None, temperature=0.05, anchor_emb=None):
     batch_size = x_emb.size(0)
     # concat two embs and cross sim
     embs = torch.cat([x_emb, y_emb], dim=0)
@@ -92,7 +103,13 @@ def gte_info_nce(x_emb, y_emb, labels=None, temperature=0.01):
     # concat qiqj, qidj, diqj, didj, for some 1 and all j
     cross_sims = torch.cat([cross_sims[:batch_size, :], cross_sims[batch_size:, batch_size:]], dim=1)
     labels = torch.arange(batch_size, batch_size*2, device=x_emb.device)
-    return F.cross_entropy(cross_sims, labels)
+
+    if anchor_emb is not None:
+        anchor_label = torch.ones(batch_size, device=x_emb.device)
+        # logits = anchor_sims - torch.logsumexp(anchor_sims, dim=1, keepdim=True)
+        # anchor_labels = torch.arange(batch_size, device=x_emb.device)
+        return F.cross_entropy(cross_sims, labels) + cosine_similarity(x_emb, anchor_emb, anchor_label)  + cov_loss(x_emb) + cov_loss(y_emb)
+    return F.cross_entropy(cross_sims, labels) #+ 0.1*cov_loss(x_emb) + 0.1*cov_loss(y_emb)#+ 0.2*align_loss(x_emb, y_emb) #+ uniform_loss(embs)
 
 
 def cosine_similarity(x_emb, y_emb, labels):

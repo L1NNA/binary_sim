@@ -189,9 +189,13 @@ class Qwen2SdpaAttentionWithBlkBias(Qwen2Attention):
         self.rotary_emb = Qwen2RotaryEmbedding(config=self.config)
         self.use_flex = getattr(config, 'use_flex', False)
         
-        # require_blk_mask = getattr(config, 'require_blk_mask', False)
-        # if require_blk_mask:
-        #     self.blk_proj = nn.Linear(self.hidden_size, self.hidden_size, bias=False)
+        self.require_blk_mask = getattr(config, 'require_blk_mask', False)
+        self.block_gate = getattr(config, 'block_gate', False)
+        self.block_bias =  self.require_blk_mask and not self.block_gate
+
+        if self.require_blk_mask and self.block_gate:
+            self.blk_proj = nn.Linear(self.hidden_size, 16, bias=True)
+            self.blk_gate = nn.Linear(16, self.hidden_size, bias=True)
         # self.arch_proj = nn.Linear(self.hidden_size, 4 * self.head_dim, bias=True)
 
     # Adapted from Qwen2Attention.forward
@@ -272,22 +276,28 @@ class Qwen2SdpaAttentionWithBlkBias(Qwen2Attention):
         #     mean_q, std_q = query_states.mean(), query_states.std()
         #     blk_bias[:,0,:,0][blk_mask.bool()] = (blk_bias[:,0,:,0][blk_mask.bool()] - mean_blk_bias) / std_blk_bias * std_q + mean_q
         
-        blk_states = None
-        if blk_mask is not None:
-            blk_bias = generate_blk_bias(self.num_heads, 
-                                        self.num_key_value_heads, 
-                                        blk_mask,
-                                        device=query_states.device, 
-                                        dtype=query_states.dtype,
-                                        flexattn=self.use_flex,
-                                        alibi=False
-                                        )
-            # blk_states = self.blk_proj(hidden_states)
-            # blk_states = blk_states * blk_mask.unsqueeze(-1)
-            # blk_states = blk_states.view(bsz, q_len, self.num_heads, self.head_dim).transpose(1, 2)
-            # query_states += blk_states
-            query_states += 0.2*blk_bias
-            key_states += 0.2*blk_bias
+        if self.require_blk_mask:
+            if self.block_bias:
+                blk_bias = generate_blk_bias(self.num_heads, 
+                                            self.num_key_value_heads, 
+                                            blk_mask,
+                                            device=query_states.device, 
+                                            dtype=query_states.dtype,
+                                            flexattn=self.use_flex,
+                                            alibi=False
+                                            )
+                query_states += 0.2*blk_bias
+                key_states += 0.2*blk_bias
+                
+            elif self.block_gate:
+                blk_states = self.blk_proj(hidden_states)
+                # blk_mask = blk_mask.clone().unsqueeze(-1)
+                blk_mask = blk_mask.unsqueeze(-1)
+                blk_states = blk_states * blk_mask
+                blk_states = torch.sigmoid(self.blk_gate(blk_states))
+                blk_states = blk_states.view(bsz, q_len, self.num_heads, self.head_dim).transpose(1, 2)
+                query_states += blk_states
+                key_states += blk_states
 
         causal_mask = attention_mask
         if attention_mask is not None:  # no matter the length, we just slice it
@@ -310,7 +320,7 @@ class Qwen2SdpaAttentionWithBlkBias(Qwen2Attention):
         if self.use_flex:
             def bias_mod(score, b, h, q_idx, kv_idx):
                 # return score + mask_flex[b, q_idx, kv_idx]
-                return score + blk_bias[b, h, kv_idx]
+                return score + blk_bias[b, h, kv_idx] if self.block_bias else score
 
             attn_output = flex_attention(
                 query_states,
@@ -651,6 +661,8 @@ class CustomQwen2BiModel(Qwen2Model):
         causal_mask = self._update_causal_mask(
             attention_mask, inputs_embeds, cache_position, past_key_values, output_attentions
         )
+        if blk_mask is not None:
+            blk_mask = blk_mask.clone()
 
         hidden_states = inputs_embeds
 

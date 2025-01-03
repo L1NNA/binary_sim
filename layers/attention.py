@@ -58,10 +58,9 @@ def generate_alibi_bias(nq, nk, q_heads, kv_heads, device = 'cuda', dtype = torc
 
     return alibi_bias
 
-def generate_blk_bias(q_heads, kv_heads, blk_mask, device = 'cuda', dtype = torch.bfloat16, use_log = False, flexattn = False):
-    alibi = kv_heads == 1
+def generate_blk_bias(q_heads, kv_heads, blk_mask, device = 'cuda', dtype = torch.bfloat16, use_log = False, flexattn = False, alibi=False):
+    
     num_heads = q_heads // kv_heads if alibi else q_heads
-    # blk_mask = blk_mask.to(dtype)
 
     for ex in blk_mask:
         temp2 = torch.arange(ex.size(0), device = device)[ex.bool()]
@@ -80,6 +79,8 @@ def generate_blk_bias(q_heads, kv_heads, blk_mask, device = 'cuda', dtype = torc
         blk_mask = slopes * blk_mask  # [1, num_heads, 1, seq_len]
     else:
         blk_mask = rearrange(blk_mask, 'b s -> b () s ()').expand(-1, num_heads, -1, -1)  # [bsz, num_heads, seq_len, 1]
+        slopes = torch.tensor([2 ** (-i / num_heads) for i in range(num_heads)], device=device, dtype = dtype).view(1, -1, 1, 1) # compute slopes for each head
+        blk_mask = slopes * blk_mask  # [bsz, num_heads, seq_len, 1]
         # blk_mask = blk_mask.expand(-1, num_heads, -1, -1)  # [1, num_heads, 1, 1, seq_len]
 
     
