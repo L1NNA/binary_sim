@@ -67,8 +67,8 @@ class EmbeddingMixin:
                   labels=None,
     ):
         result = self.get_hidden_state(input_ids, attention_mask, blk_mask=blk_mask, arch=arch)
-        hidden_state = result.last_hidden_state
-        all_hidden_states = result.hidden_states if 'hidden_states' in result else None
+        hidden_state = result #.last_hidden_state
+        all_hidden_states = None # result.hidden_states if 'hidden_states' in result else None
         x_emb = self.get_pooling(hidden_state, attention_mask, blk_mask=blk_mask)
 
         y_emb = None

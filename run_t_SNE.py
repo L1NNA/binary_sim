@@ -101,7 +101,7 @@ def get_embeddings(
             batch_dict = get_tokens(funcs[j:j+test_batch_size], tokenizer, max_blocks, max_length).to(device)
             query_outputs = model(**batch_dict).embedding.cpu().float().numpy().tolist()
             embeddings.extend(query_outputs)
-    embeddings = torch.cat(embeddings, dim=0)
+    # embeddings = torch.cat(embeddings, dim=0)
     return embeddings
 
 
@@ -117,11 +117,11 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     model_checkpoints = {
+        'customcodeqwen2vec': './model_checkpoints/simcse_customcodeqwen2vec_uptrained/checkpoint-34688',
         'qwen_emb': './model_checkpoints/simcse_qwen_emb/checkpoint-15000',
         'codet5p-110m-embedding': './model_checkpoints/simcse_codet5p-110m-embedding/checkpoint-1608',
         'graphcodebert': './model_checkpoints/simcse_graphcodebert/checkpoint-2345',
-        'qwen_llm2vec': './model_checkpoints/simcse_codeqwen2vec_uptrained/checkpoint-67500',
-        'customcodeqwen2vec': './model_checkpoints/simcse_customcodeqwen2vec_uptrained/checkpoint-34688',
+        'qwen_llm2vec': './model_checkpoints/simcse_codeqwen2vec/checkpoint-11250',
     }
     
     sources = [
@@ -144,8 +144,8 @@ if __name__ == '__main__':
             torch_dtype=torch.bfloat16
         ).to(args.device)
         model = nn.DataParallel(model)
-    
-    
+        model.eval()
+
         tokenizer = AutoTokenizer.from_pretrained(
             model_path,
             trust_remote_code=True,
@@ -153,13 +153,13 @@ if __name__ == '__main__':
             truncation_side='left',
         )
 
-        special_tokens = ['<addr>', '<byte>', '<str>', '<BLK>']
-        tokenizer.add_special_tokens({'additional_special_tokens': special_tokens})
-        tokenizer.eos_token = '<EOS>'
-        tokenizer.sep_token = '<SEP>'
-        tokenizer.pad_token = '<PAD>'
-        tokenizer.unk_token = '<unk>'
-        model.eval()
+        if 'coder' in model_path:
+            special_tokens = ['<addr>', '<byte>', '<str>', '<BLK>']
+            tokenizer.add_special_tokens({'additional_special_tokens': special_tokens})
+            tokenizer.eos_token = '<EOS>'
+            tokenizer.sep_token = '<SEP>'
+            tokenizer.pad_token = '<PAD>'
+            tokenizer.unk_token = '<unk>'
 
         
         for i in range(len(sources)):
@@ -176,6 +176,6 @@ if __name__ == '__main__':
                 f.write(json.dumps({
                     'model_name': model_name,
                     'source': source,
-                    'embeddings': embeddings.tolist(),
+                    'embeddings': embeddings,
                     'func_names': func_names
                 }) + '\n')

@@ -277,7 +277,7 @@ class Qwen2SdpaAttentionWithBlkBias(Qwen2Attention):
         #     blk_bias[:,0,:,0][blk_mask.bool()] = (blk_bias[:,0,:,0][blk_mask.bool()] - mean_blk_bias) / std_blk_bias * std_q + mean_q
         
         if self.require_blk_mask:
-            if self.block_bias:
+            if self.block_bias and blk_mask is not None:
                 blk_bias = generate_blk_bias(self.num_heads, 
                                             self.num_key_value_heads, 
                                             blk_mask,
@@ -381,13 +381,13 @@ class ModifiedQwen2DecoderLayer(Qwen2DecoderLayer):
         nn.Module.__init__(self)
         self.hidden_size = config.hidden_size
 
-        # self.self_attn = Qwen2SdpaAttentionWithBlkBias(
-        #     config=config, layer_idx=layer_idx
-        # )
-
-        self.self_attn = QWEN2_ATTENTION_CLASSES[config._attn_implementation](
+        self.self_attn = Qwen2SdpaAttentionWithBlkBias(
             config=config, layer_idx=layer_idx
         )
+
+        # self.self_attn = QWEN2_ATTENTION_CLASSES[config._attn_implementation](
+        #     config=config, layer_idx=layer_idx
+        # )
 
         # self.self_attn = CustomQwen2Attention(
         #     config=config, layer_idx=layer_idx

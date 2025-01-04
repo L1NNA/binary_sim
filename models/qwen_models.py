@@ -10,11 +10,10 @@ from models.llm2vec_custom import CustomQwen2BiModel
 
 class Qwen2ForSequenceEmbedding(Qwen2Model, EmbeddingMixin):
 
-    def get_hidden_state(self, input_ids, attention_mask, blk_mask=None):
+    def get_hidden_state(self, input_ids, attention_mask, **kwargs):
         return super().forward(
             input_ids=input_ids, 
-            attention_mask=attention_mask, 
-            blk_mask=blk_mask,
+            attention_mask=attention_mask
         ).last_hidden_state
 
     def forward(self, input_ids, attention_mask, y_input_ids=None, y_attention_mask=None, labels=None, **kwargs):
@@ -59,7 +58,7 @@ class CustomQwen2ForSequenceEmbedding(CustomQwen2BiModel, EmbeddingMixin):
             output_hidden_states=True if not self.training else False,
         )
         # return result.last_hidden_state
-        return result
+        return result.last_hidden_state
 
     def forward(self, input_ids, 
                 attention_mask, 

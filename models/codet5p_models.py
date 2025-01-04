@@ -80,13 +80,14 @@ class CodeT5PEncoderForSequenceEmbedding(T5EncoderModel, EmbeddingMixin):
         super().__init__(config)
         self.proj = nn.Linear(config.d_model, config.embed_dim)
 
-    def get_pooling(self, hidden_state, attention_mask):
+    def get_pooling(self, hidden_state, attention_mask, **kwargs):
         return hidden_state
 
     def get_hidden_state(
-            self,
-            input_ids,
-            attention_mask
+        self,
+        input_ids,
+        attention_mask,
+        **kwargs
     ):
         encoder_outputs = self.encoder(
             input_ids=input_ids,
