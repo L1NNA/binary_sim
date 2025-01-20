@@ -10,6 +10,9 @@ import os
 import random
 import pickle
 import itertools
+from collections import defaultdict
+from collections import namedtuple
+from typing import List
 
 import numpy as np
 from tqdm import tqdm, trange
@@ -27,6 +30,12 @@ from models.qwen_models import Qwen2ForSequenceEmbedding, CustomQwen2ForSequence
 from models.codet5p_models import CodeT5PEncoderForSequenceEmbedding
 from models.bert_models import GraphCodeBERTForSequenceEmbedding
 
+selected_colors = ["582f0e","7f4f24","936639","a68a64","b6ad90","c2c5aa","a4ac86","656d4a","414833","333d29"] + \
+         ["03045e","023e8a","0077b6","0096c7","00b4d8","48cae4","90e0ef","ade8f4","caf0f8"] + \
+         ["590d22","800f2f","a4133c","c9184a","ff4d6d","ff758f","ff8fa3","ffb3c1","ffccd5","fff0f3"] + \
+         ["0466c8","0353a4","023e7d","002855","001845","001233","33415c","5c677d","7d8597","979dac"]
+
+
 
 def train_t_SNE(embeddings, perplexity=30, random_state=0):
     scaler = StandardScaler()
@@ -37,12 +46,13 @@ def train_t_SNE(embeddings, perplexity=30, random_state=0):
     X_tsne = tsne.fit_transform(X_scaled)
     return X_tsne
 
-def plot_t_SNE(X_tsne, embeddings, func_labels, opt_labels, func_names, opts):
+
+def plot_t_SNE(X_tsne, embeddings, func_labels, opt_labels, func_names, opts, title, output_path):
     # Plotting
     plt.figure(figsize=(10, 8))
 
     # create len(func_names) colors
-    colors = plt.cm.tab10.colors
+    colors = plt.cm.rainbow(np.linspace(0, 1, len(func_names)))
     # create len(trans) shapes
     shapes = ['o', 's', '^', 'v', 'D']
     assert len(shapes) >= len(opts), f"Not enough number of shapes {len(opts)}, only support {len(shapes)}"
@@ -58,21 +68,29 @@ def plot_t_SNE(X_tsne, embeddings, func_labels, opt_labels, func_names, opts):
         plt.scatter(X_tsne[mask, 0], X_tsne[mask, 1], color=colors[0], marker=shapes[i], alpha=0.6, label=opts[i])
 
     # create a standalone legend for the colors
-    for i in range(len(func_names)):
-        mask = (func_labels == i) & (opt_labels == 0)
-        plt.scatter(X_tsne[mask, 0], X_tsne[mask, 1], color=colors[i], marker='o', alpha=0.6, label=func_names[i])
+    # for i in range(len(func_names)):
+    #     mask = (func_labels == i) & (opt_labels == 0)
+    #     plt.scatter(X_tsne[mask, 0], X_tsne[mask, 1], color=colors[i], marker='o', alpha=0.6, label=func_names[i])
 
-    plt.title('t-SNE Visualization')
+    plt.title(title)
     plt.legend()
-    plt.show()
     
+
+    # save the plot
+    if output_path:
+        plt.savefig(output_path)
+    else:
+        plt.show()
+
     
+Embeddings = namedtuple('Embeddings', ['embeddings', 'model_name', 'source', 'func_names'])
+
 models = {
     'qwen_emb': ('Alibaba-NLP/gte-Qwen2-1.5B-instruct', Qwen2ForSequenceEmbedding),
     'codet5p-110m-embedding': ('Salesforce/codet5p-110m-embedding', CodeT5PEncoderForSequenceEmbedding),
     'graphcodebert': ('microsoft/graphcodebert-base', GraphCodeBERTForSequenceEmbedding),
     'qwen_llm2vec': ('Qwen/Qwen2.5-Coder-0.5B-Instruct', Qwen2MNTPForSequenceEmbedding),
-    'customcodeqwen2vec': ('Qwen/Qwen2.5-Coder-0.5B-Instruct', CustomQwen2ForSequenceEmbedding),
+    'customcodeqwen2vec': ('Qwen/Qwen2.5-Coder-0.5B-Instruct', Qwen2ForSequenceEmbedding), # CustomQwen2ForSequenceEmbedding
 }
 
 def load_data(data_path, sources, pool_size=100):
@@ -105,7 +123,7 @@ def get_embeddings(
     return embeddings
 
 
-if __name__ == '__main__':
+def gen_main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--data_path', type=str, default='./datasets')
     parser.add_argument('--max_length', type=int, default=512)
@@ -124,6 +142,11 @@ if __name__ == '__main__':
         'qwen_llm2vec': './model_checkpoints/simcse_codeqwen2vec/checkpoint-11250',
     }
     
+    model_checkpoints = {
+        'qwen_emb': None,
+        'qwen_llm2vec': None,
+    }
+    
     sources = [
         'o0', 'o1', 'o2', 'o3',
         'obf_all', 'obf_none', 'obf_sub', 'obf_fla', 'obf_bcf',
@@ -139,7 +162,7 @@ if __name__ == '__main__':
     
         model_path, model_class = models[model_name]
         model = model_class.from_pretrained(
-            checkpoint,
+            checkpoint if checkpoint else model_path,
             # device_map='auto',
             torch_dtype=torch.bfloat16
         ).to(args.device)
@@ -174,8 +197,58 @@ if __name__ == '__main__':
 
             with open(args.output_path, 'a') as f:
                 f.write(json.dumps({
-                    'model_name': model_name,
+                    'model_name': model_name + ('_zero' if checkpoint is None else ''),
                     'source': source,
                     'embeddings': embeddings,
                     'func_names': func_names
                 }) + '\n')
+                
+                
+def plot_main(sources_group=[
+        ['arm', 'powerpc', 'x86_32', 'x86_64', 'mips'],
+        ['o0','o1','o2','o3'],
+        ['obf_all','obf_none','obf_sub','obf_fla','obf_bcf'],
+        ['clang','gcc'],
+        ['arm','powerpc','x86_32','x86_64','mips'],
+    ]):
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--input_path', type=str, required=True)
+    parser.add_argument('--output_path', type=str, default='output jsonl path')
+    parser.add_argument('--num_of_funcs', type=int, default='output jsonl path')
+    parser.add_argument('--source', type=int, default='output jsonl path')
+    args = parser.parse_args()
+    
+    results:List[Embeddings] = []
+
+    with open(args.input_path, 'r') as f:
+        for line in f:
+            results.append(Embeddings(**json.loads(line)))
+    
+    num_of_funcs = args.num_of_funcs
+    num_of_sources = args.num_of_sources
+
+    func_names = results[0].func_names[:num_of_funcs]
+    sources = sources_group[args.source)
+    func_labels = np.concatenate([
+        [*range(len(func_names))] * len(sources)
+    ], axis=0)
+    source_labels = np.concatenate([
+        [i] * len(func_names) for i in range(len(sources))
+    ], axis=0)
+    
+    model_embeddings = defaultdict(dict)
+    for result in results:
+        model_embeddings[result.model_name][result.source] = result.embeddings
+    
+    for model_name in model_embeddings:
+  
+        all_embs = np.concatenate(
+            [model_embeddings[model_name][key][:num_of_funcs] for key in sources],
+            axis=0
+        )
+        tsne = train_t_SNE(qwen_llm2vec_embs, perplexity=num_of_funcs, random_state=0)
+        plot_t_SNE(tsne, qwen_llm2vec_embs, func_labels, source_labels, func_names, sources, model_name)
+    
+
+if __name__ == '__main__':
+    plot_main()
