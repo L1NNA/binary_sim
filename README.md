@@ -12,11 +12,12 @@ pip install -r requirements.txt
 
 ## Load Dataset
 Download the test files from the release page, place under `datasets` folder
+If you're curious about the data generation process, check the files under folder `data_gen`.
 
 ## All components
 
 ### 1-2. Data augmentation and Causal Training
-Please check the data generation process under folder `data_gen`
+Please check the causal generation process in `data_loaders\causal_dataset.py` 
 ```bash
 torchrun --nproc_per_node=4 --master_port=1234 run_causalLM.py \
     --model codeqwen  \
@@ -42,5 +43,6 @@ torchrun --nproc_per_node=4 --master_port=1234 run_simcse.py \
 
 ### Test and evaluation
 Run `run_test_retrieval[_BinCorp].py` for retrieval tasks
+
 Run `run_t_SNE.py` to plot the embedding distributions
 
