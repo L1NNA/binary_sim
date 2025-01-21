@@ -126,49 +126,49 @@ def main():
             f.write(json.dumps(js) + '\n')
     print("Finish training data generation")
     
-#     # get testing files for cross-opt
-#     path_opt = "datasets/BinaryCorp/small_test/**"
-#     testing = glob.glob(path_opt, recursive=True)
-#     O0 = [i for i in testing if 'O0' in i.split('-')]
-#     O1 = [i for i in testing if 'O1' in i.split('-')]
-#     O2 = [i for i in testing if 'O2' in i.split('-')]
-#     O3 = [i for i in testing if 'O3' in i.split('-')]
-#     Os = [i for i in testing if 'Os' in i.split('-')]
+    # get testing files for cross-opt
+    path_opt = "datasets/BinaryCorp/small_test/**"
+    testing = glob.glob(path_opt, recursive=True)
+    O0 = [i for i in testing if 'O0' in i.split('-')]
+    O1 = [i for i in testing if 'O1' in i.split('-')]
+    O2 = [i for i in testing if 'O2' in i.split('-')]
+    O3 = [i for i in testing if 'O3' in i.split('-')]
+    Os = [i for i in testing if 'Os' in i.split('-')]
     
-#     # get testing files for O0 optimization
-#     print("Generating O0 data...")
-#     with open('datasets/test_BinaryCorp_O0.jsonl', 'a') as f:
-#         for js in generate_single(O0, 'O0'):
-#             f.write(json.dumps(js) + '\n')
-#     print("Finish O0 data generation")
+    # get testing files for O0 optimization
+    print("Generating O0 data...")
+    with open('datasets/test_BinaryCorp_O0.jsonl', 'a') as f:
+        for js in generate_single(O0, 'O0'):
+            f.write(json.dumps(js) + '\n')
+    print("Finish O0 data generation")
     
-#     # get testing files for O1 optimization
-#     print("Generating O1 data...")
-#     with open('datasets/test_BinaryCorp_O1.jsonl', 'a') as f:
-#         for js in generate_single(O1, 'O1'):
-#             f.write(json.dumps(js) + '\n')
-#     print("Finish O1 data generation")
+    # get testing files for O1 optimization
+    print("Generating O1 data...")
+    with open('datasets/test_BinaryCorp_O1.jsonl', 'a') as f:
+        for js in generate_single(O1, 'O1'):
+            f.write(json.dumps(js) + '\n')
+    print("Finish O1 data generation")
     
-#     # get testing files for O2 optimization
-#     print("Generating O2 data...")
-#     with open('datasets/test_BinaryCorp_O2.jsonl', 'a') as f:
-#         for js in generate_single(O2, 'O2'):
-#             f.write(json.dumps(js) + '\n')
-#     print("Finish O2 data generation")
+    # get testing files for O2 optimization
+    print("Generating O2 data...")
+    with open('datasets/test_BinaryCorp_O2.jsonl', 'a') as f:
+        for js in generate_single(O2, 'O2'):
+            f.write(json.dumps(js) + '\n')
+    print("Finish O2 data generation")
     
-#     # get testing files for O3 optimization
-#     print("Generating O3 data...")
-#     with open('datasets/test_BinaryCorp_O3.jsonl', 'a') as f:
-#         for js in generate_single(O3, 'O3'):
-#             f.write(json.dumps(js) + '\n')
-#     print("Finish O3 data generation")
+    # get testing files for O3 optimization
+    print("Generating O3 data...")
+    with open('datasets/test_BinaryCorp_O3.jsonl', 'a') as f:
+        for js in generate_single(O3, 'O3'):
+            f.write(json.dumps(js) + '\n')
+    print("Finish O3 data generation")
     
-#     # get testing files for Os optimization
-#     print("Generating Os data...")
-#     with open('datasets/test_BinaryCorp_Os.jsonl', 'a') as f:
-#         for js in generate_single(Os, 'Os'):
-#             f.write(json.dumps(js) + '\n')
-#     print("Finish Os data generation")
+    # get testing files for Os optimization
+    print("Generating Os data...")
+    with open('datasets/test_BinaryCorp_Os.jsonl', 'a') as f:
+        for js in generate_single(Os, 'Os'):
+            f.write(json.dumps(js) + '\n')
+    print("Finish Os data generation")
     
         
 

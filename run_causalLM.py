@@ -1,27 +1,21 @@
-import json
+import os
 import argparse
 from datetime import datetime
 from os.path import join
-import numpy as np
 
 from tqdm import tqdm
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
-from transformers import AutoTokenizer, AutoModel, AutoModelForCausalLM
-from torch.nn import DataParallel
-from torch.utils.data import Dataset
-from transformers import TrainingArguments, Trainer, TrainerCallback
-from torch.utils.data import Dataset, DataLoader, random_split
-from sklearn.metrics import f1_score, recall_score, precision_score
+import numpy as np
+from transformers import AutoTokenizer, AutoModelForCausalLM
+from transformers import TrainingArguments, Trainer
+from torch.utils.data import random_split
 
-from data_loaders.causal_dataset import CausalDataset, causal_collate, CausalDatasetPair, causal_pair_collate
-from peft import get_peft_config, get_peft_model, get_peft_model_state_dict, PrefixTuningConfig, TaskType, LoraConfig
+from data_loaders.causal_dataset import CausalDatasetPair, causal_pair_collate
 
-from utils import compute_metrics
-import os
-from safetensors.torch import load_file
+
 
 models = {
     'codet5p-220m': "Salesforce/codet5p-220m",
@@ -87,17 +81,6 @@ def main():
         backbone = AutoModelForCausalLM.from_pretrained(checkpoint, trust_remote_code=True)
     tokenizer = AutoTokenizer.from_pretrained(checkpoint, trust_remote_code=True, padding_side='left', truncation_side='left')
 
-
-    if args.model == 'codet5p-220m' or args.model == 'codet5p-770m':
-        vocab = backbone.config.vocab_size
-        dim =  backbone.config.hidden_size
-        backbone.encoder.embed_tokens = nn.Embedding(vocab, dim)
-        backbone.decoder.embed_tokens = nn.Embedding(vocab, dim)
-        with torch.no_grad():
-            backbone.encoder.embed_tokens.weight.copy_(backbone.shared.weight)
-            backbone.decoder.embed_tokens.weight.copy_(backbone.shared.weight)
-    elif args.model == 'codet5p-110m-embedding':
-        del backbone.shared
 
     ########## Load Data ##########
     path = os.path.join(os.getcwd(), 'datasets')

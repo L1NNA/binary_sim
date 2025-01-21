@@ -132,200 +132,200 @@ def generate_single(list_of_files, stage, require_cfg=False, min_blocks=3, add_c
 def main():
     training, O0, O1, O2, O3, gcc, clang, obf_bcf, obf_fla, obf_all, obf_sub, obf_none, arm, x86_64, x86_32, mips, powerpc = [],[],[],[],[],[],[],[],[],[],[],[],[],[],[],[],[]
     
-#     # generate training
-#     path_train = 'datasets/firmware_images'
-#     libs = [
-#         'l-busybox-busybox_unstripped', 'l-sqlite-sqlite3',
-#         'l-coreutils-coreutils', 'l-curl-curl',
-#         'l-ImageMagick-magick', 'l-putty-puttygen'
-#     ]
-#     for lib in libs:
-#         files = os.listdir(os.path.join(path_train, lib))
-#         for file in files:
-#             if 'merged' in file:
-#                 training.append(os.path.join(path_train, lib,file))
+    # generate training
+    path_train = 'datasets/firmware_images'
+    libs = [
+        'l-busybox-busybox_unstripped', 'l-sqlite-sqlite3',
+        'l-coreutils-coreutils', 'l-curl-curl',
+        'l-ImageMagick-magick', 'l-putty-puttygen'
+    ]
+    for lib in libs:
+        files = os.listdir(os.path.join(path_train, lib))
+        for file in files:
+            if 'merged' in file:
+                training.append(os.path.join(path_train, lib,file))
                 
-#     ## add obfuscated code
-#     path_train2 = 'libraries/data/obfuscation/imagemagick'
-#     files = os.listdir(path_train2)
-#     for file in files:
-#         if 'merged' in file:
-#             training.append(os.path.join(path_train2, file))
+    ## add obfuscated code
+    path_train2 = 'libraries/data/obfuscation/imagemagick'
+    files = os.listdir(path_train2)
+    for file in files:
+        if 'merged' in file:
+            training.append(os.path.join(path_train2, file))
 
-#     ## add clang code
-#     path_train3 = 'libraries/data/compiler/imagemagick'
-#     files = os.listdir(path_train3)
-#     for file in files:
-#         if 'merged' in file and 'clang' in file:
-#             training.append(os.path.join(path_train3, file))
+    ## add clang code
+    path_train3 = 'libraries/data/compiler/imagemagick'
+    files = os.listdir(path_train3)
+    for file in files:
+        if 'merged' in file and 'clang' in file:
+            training.append(os.path.join(path_train3, file))
         
     
-#     print("Generating training data...")
-#     with open('datasets/train.jsonl', 'a') as f:
-#         for js in generate_single(training, 'training'):
-#             f.write(json.dumps(js) + '\n')
-#     print("Finish training data generation")
+    print("Generating training data...")
+    with open('datasets/train.jsonl', 'a') as f:
+        for js in generate_single(training, 'training'):
+            f.write(json.dumps(js) + '\n')
+    print("Finish training data generation")
     
     
-    # get testing files for cross-opt
-#     path_opt = 'libraries/data/optimization-amd64'
-#     for lib in tqdm(['gmp','libtomcrypt','openssl']):
-#         files = os.listdir(os.path.join(path_opt, lib))
-#         for file in files:
-#             if 'o0' in file and 'merged' in file:
-#                 O0.append(os.path.join(path_opt, os.path.join(lib,file)))
-#             if 'o1' in file and 'merged' in file:
-#                 O1.append(os.path.join(path_opt, os.path.join(lib,file)))
-#             if 'o2' in file and 'merged' in file:
-#                 O2.append(os.path.join(path_opt, os.path.join(lib,file)))
-#             if 'o3' in file and 'merged' in file:
-#                 O3.append(os.path.join(path_opt, os.path.join(lib,file)))
+    get testing files for cross-opt
+    path_opt = 'libraries/data/optimization-amd64'
+    for lib in tqdm(['gmp','libtomcrypt','openssl']):
+        files = os.listdir(os.path.join(path_opt, lib))
+        for file in files:
+            if 'o0' in file and 'merged' in file:
+                O0.append(os.path.join(path_opt, os.path.join(lib,file)))
+            if 'o1' in file and 'merged' in file:
+                O1.append(os.path.join(path_opt, os.path.join(lib,file)))
+            if 'o2' in file and 'merged' in file:
+                O2.append(os.path.join(path_opt, os.path.join(lib,file)))
+            if 'o3' in file and 'merged' in file:
+                O3.append(os.path.join(path_opt, os.path.join(lib,file)))
     
-#     # get testing files for O0 optimization
-#     print("Generating O0 data...")
-#     with open('datasets/test_o0.jsonl', 'a') as f:
-#         for js in generate_single(O0, 'O0'):
-#             f.write(json.dumps(js) + '\n')
-#     print("Finish O0 data generation")
+    # get testing files for O0 optimization
+    print("Generating O0 data...")
+    with open('datasets/test_o0.jsonl', 'a') as f:
+        for js in generate_single(O0, 'O0'):
+            f.write(json.dumps(js) + '\n')
+    print("Finish O0 data generation")
     
-#     # get testing files for O1 optimization
-#     print("Generating O1 data...")
-#     with open('datasets/test_o1.jsonl', 'a') as f:
-#         for js in generate_single(O1, 'O1'):
-#             f.write(json.dumps(js) + '\n')
-#     print("Finish O1 data generation")
+    # get testing files for O1 optimization
+    print("Generating O1 data...")
+    with open('datasets/test_o1.jsonl', 'a') as f:
+        for js in generate_single(O1, 'O1'):
+            f.write(json.dumps(js) + '\n')
+    print("Finish O1 data generation")
     
-#     # get testing files for O2 optimization
-#     print("Generating O2 data...")
-#     with open('datasets/test_o2.jsonl', 'a') as f:
-#         for js in generate_single(O2, 'O2'):
-#             f.write(json.dumps(js) + '\n')
-#     print("Finish O2 data generation")
+    # get testing files for O2 optimization
+    print("Generating O2 data...")
+    with open('datasets/test_o2.jsonl', 'a') as f:
+        for js in generate_single(O2, 'O2'):
+            f.write(json.dumps(js) + '\n')
+    print("Finish O2 data generation")
     
-#     # get testing files for O3 optimization
-#     print("Generating O3 data...")
-#     with open('datasets/test_o3.jsonl', 'a') as f:
-#         for js in generate_single(O3, 'O3'):
-#             f.write(json.dumps(js) + '\n')
-#     print("Finish O3 data generation")
+    # get testing files for O3 optimization
+    print("Generating O3 data...")
+    with open('datasets/test_o3.jsonl', 'a') as f:
+        for js in generate_single(O3, 'O3'):
+            f.write(json.dumps(js) + '\n')
+    print("Finish O3 data generation")
     
-#     # get testing files for cross-compiler
-#     path_compiler = 'libraries/data/compiler'
-#     for lib in ['gmp','libtomcrypt','openssl']:
-#         files = os.listdir(os.path.join(path_compiler, lib))
-#         for file in files:
-#             if 'merged' in file and 'gcc' in file:
-#                 gcc.append(os.path.join(path_compiler, lib, file))
-#             if 'merged' in file and 'clang' in file:
-#                 clang.append(os.path.join(path_compiler, lib, file))
-#     print("Generating cross-compiler data...")
-#     with open('datasets/test_gcc.jsonl', 'a') as f:
-#         for js in generate_single(gcc, 'gcc'):
-#             f.write(json.dumps(js) + '\n')
-#     with open('datasets/test_clang.jsonl', 'a') as f:
-#         for js in generate_single(clang, 'clang'):
-#             f.write(json.dumps(js) + '\n')
-#     print("Finish cross-compiler data generation")
+    # get testing files for cross-compiler
+    path_compiler = 'libraries/data/compiler'
+    for lib in ['gmp','libtomcrypt','openssl']:
+        files = os.listdir(os.path.join(path_compiler, lib))
+        for file in files:
+            if 'merged' in file and 'gcc' in file:
+                gcc.append(os.path.join(path_compiler, lib, file))
+            if 'merged' in file and 'clang' in file:
+                clang.append(os.path.join(path_compiler, lib, file))
+    print("Generating cross-compiler data...")
+    with open('datasets/test_gcc.jsonl', 'a') as f:
+        for js in generate_single(gcc, 'gcc'):
+            f.write(json.dumps(js) + '\n')
+    with open('datasets/test_clang.jsonl', 'a') as f:
+        for js in generate_single(clang, 'clang'):
+            f.write(json.dumps(js) + '\n')
+    print("Finish cross-compiler data generation")
     
-#     # get testing files for obfuscation
-#     path_obfuscation = 'libraries/data/obfuscation'
-#     for lib in ['gmp','libtomcrypt','openssl']:
-#         files = os.listdir(os.path.join(path_obfuscation, lib))
-#         for file in files:
-#             if 'merged' in file and 'g-bcf.so' in file:
-#                 obf_bcf.append(os.path.join(path_obfuscation, lib, file))
-#             if 'merged' in file and 'g-fla.so' in file:
-#                 obf_fla.append(os.path.join(path_obfuscation, lib, file))
-#             if 'merged' in file and 'g-sub-fla-bcf.so' in file:
-#                 obf_all.append(os.path.join(path_obfuscation, lib, file))
-#             if 'merged' in file and 'g-sub.so' in file:
-#                 obf_sub.append(os.path.join(path_obfuscation, lib, file))
-#             if 'merged' in file and 'g.so' in file:
-#                 obf_none.append(os.path.join(path_obfuscation, lib, file))
-#     print("Generating cross-obf data...")
-#     with open('datasets/test_obf_bcf.jsonl', 'a') as f:
-#         for js in generate_single(obf_bcf, 'obf_bcf'):
-#             f.write(json.dumps(js) + '\n')
-#     with open('datasets/test_obf_fla.jsonl', 'a') as f:
-#         for js in generate_single(obf_fla, 'obf_fla'):
-#             f.write(json.dumps(js) + '\n')
-#     with open('datasets/test_obf_all.jsonl', 'a') as f:
-#         for js in generate_single(obf_all, 'obf_all'):
-#             f.write(json.dumps(js) + '\n')
-#     with open('datasets/test_obf_sub.jsonl', 'a') as f:
-#         for js in generate_single(obf_sub, 'obf_sub'):
-#             f.write(json.dumps(js) + '\n')
-#     with open('datasets/test_obf_none.jsonl', 'a') as f:
-#         for js in generate_single(obf_none, 'obf_none'):
-#             f.write(json.dumps(js) + '\n')
-#     print("Finish cross-obf data generation")
+    # get testing files for obfuscation
+    path_obfuscation = 'libraries/data/obfuscation'
+    for lib in ['gmp','libtomcrypt','openssl']:
+        files = os.listdir(os.path.join(path_obfuscation, lib))
+        for file in files:
+            if 'merged' in file and 'g-bcf.so' in file:
+                obf_bcf.append(os.path.join(path_obfuscation, lib, file))
+            if 'merged' in file and 'g-fla.so' in file:
+                obf_fla.append(os.path.join(path_obfuscation, lib, file))
+            if 'merged' in file and 'g-sub-fla-bcf.so' in file:
+                obf_all.append(os.path.join(path_obfuscation, lib, file))
+            if 'merged' in file and 'g-sub.so' in file:
+                obf_sub.append(os.path.join(path_obfuscation, lib, file))
+            if 'merged' in file and 'g.so' in file:
+                obf_none.append(os.path.join(path_obfuscation, lib, file))
+    print("Generating cross-obf data...")
+    with open('datasets/test_obf_bcf.jsonl', 'a') as f:
+        for js in generate_single(obf_bcf, 'obf_bcf'):
+            f.write(json.dumps(js) + '\n')
+    with open('datasets/test_obf_fla.jsonl', 'a') as f:
+        for js in generate_single(obf_fla, 'obf_fla'):
+            f.write(json.dumps(js) + '\n')
+    with open('datasets/test_obf_all.jsonl', 'a') as f:
+        for js in generate_single(obf_all, 'obf_all'):
+            f.write(json.dumps(js) + '\n')
+    with open('datasets/test_obf_sub.jsonl', 'a') as f:
+        for js in generate_single(obf_sub, 'obf_sub'):
+            f.write(json.dumps(js) + '\n')
+    with open('datasets/test_obf_none.jsonl', 'a') as f:
+        for js in generate_single(obf_none, 'obf_none'):
+            f.write(json.dumps(js) + '\n')
+    print("Finish cross-obf data generation")
 
-#  # get testing files for cross-architecture
-#     path_compiler = 'libraries/data/optimization-cross-arch/l-openssl-openssl'
-#     files = os.listdir(path_compiler)
-#     for file in files:
-#         if 'merged' in file and '-gcc-' in file:
-#             x86_64.append(os.path.join(path_compiler, file))
-#         if 'merged' in file and 'arm' in file:
-#             arm.append(os.path.join(path_compiler, file))
-#         if 'merged' in file and 'gcc32' in file:
-#             x86_32.append(os.path.join(path_compiler, file))
-#         if 'merged' in file and 'mips' in file:
-#             mips.append(os.path.join(path_compiler, file))
-#         if 'merged' in file and 'powerpc' in file:
-#             powerpc.append(os.path.join(path_compiler, file))
-#     print("Generating cross-compiler data...")
-#     with open('datasets/test_x86_64.jsonl', 'a') as f:
-#         for js in generate_single(x86_64, 'x86_64'):
-#             f.write(json.dumps(js) + '\n')
-#     with open('datasets/test_arm.jsonl', 'a') as f:
-#         for js in generate_single(arm, 'arm'):
-#             f.write(json.dumps(js) + '\n')
-#     with open('datasets/test_x86_32.jsonl', 'a') as f:
-#         for js in generate_single(x86_32, 'x86_32'):
-#             f.write(json.dumps(js) + '\n')
-#     with open('datasets/test_mips.jsonl', 'a') as f:
-#         for js in generate_single(mips, 'mips'):
-#             f.write(json.dumps(js) + '\n')
-#     with open('datasets/test_powerpc.jsonl', 'a') as f:
-#         for js in generate_single(powerpc, 'powerpc'):
-#             f.write(json.dumps(js) + '\n')
-#     print("Finish cross-compiler data generation")
+ # get testing files for cross-architecture
+    path_compiler = 'libraries/data/optimization-cross-arch/l-openssl-openssl'
+    files = os.listdir(path_compiler)
+    for file in files:
+        if 'merged' in file and '-gcc-' in file:
+            x86_64.append(os.path.join(path_compiler, file))
+        if 'merged' in file and 'arm' in file:
+            arm.append(os.path.join(path_compiler, file))
+        if 'merged' in file and 'gcc32' in file:
+            x86_32.append(os.path.join(path_compiler, file))
+        if 'merged' in file and 'mips' in file:
+            mips.append(os.path.join(path_compiler, file))
+        if 'merged' in file and 'powerpc' in file:
+            powerpc.append(os.path.join(path_compiler, file))
+    print("Generating cross-compiler data...")
+    with open('datasets/test_x86_64.jsonl', 'a') as f:
+        for js in generate_single(x86_64, 'x86_64'):
+            f.write(json.dumps(js) + '\n')
+    with open('datasets/test_arm.jsonl', 'a') as f:
+        for js in generate_single(arm, 'arm'):
+            f.write(json.dumps(js) + '\n')
+    with open('datasets/test_x86_32.jsonl', 'a') as f:
+        for js in generate_single(x86_32, 'x86_32'):
+            f.write(json.dumps(js) + '\n')
+    with open('datasets/test_mips.jsonl', 'a') as f:
+        for js in generate_single(mips, 'mips'):
+            f.write(json.dumps(js) + '\n')
+    with open('datasets/test_powerpc.jsonl', 'a') as f:
+        for js in generate_single(powerpc, 'powerpc'):
+            f.write(json.dumps(js) + '\n')
+    print("Finish cross-compiler data generation")
 
-#     ### generate training set with cfg for baselines
-#     train_cfg = []
-#     path_train = 'datasets/firmware_images'
-#     libs = [
-#         'l-busybox-busybox_unstripped', 'l-sqlite-sqlite3',
-#         'l-coreutils-coreutils', 'l-curl-curl',
-#         'l-ImageMagick-magick', 'l-putty-puttygen'
-#     ]
-#     for lib in libs:
-#         files = os.listdir(os.path.join(path_train, lib))
-#         for file in files:
-#             if 'merged' in file:
-#                 train_cfg.append(os.path.join(path_train, lib,file))
+    ### generate training set with cfg for baselines
+    train_cfg = []
+    path_train = 'datasets/firmware_images'
+    libs = [
+        'l-busybox-busybox_unstripped', 'l-sqlite-sqlite3',
+        'l-coreutils-coreutils', 'l-curl-curl',
+        'l-ImageMagick-magick', 'l-putty-puttygen'
+    ]
+    for lib in libs:
+        files = os.listdir(os.path.join(path_train, lib))
+        for file in files:
+            if 'merged' in file:
+                train_cfg.append(os.path.join(path_train, lib,file))
                 
-#     ## add obfuscated code
-#     path_train2 = 'libraries/data/obfuscation/imagemagick'
-#     files = os.listdir(path_train2)
-#     for file in files:
-#         if 'merged' in file:
-#             train_cfg.append(os.path.join(path_train2, file))
+    ## add obfuscated code
+    path_train2 = 'libraries/data/obfuscation/imagemagick'
+    files = os.listdir(path_train2)
+    for file in files:
+        if 'merged' in file:
+            train_cfg.append(os.path.join(path_train2, file))
 
-#     ## add clang code
-#     path_train3 = 'libraries/data/compiler/imagemagick'
-#     files = os.listdir(path_train3)
-#     for file in files:
-#         if 'merged' in file and 'clang' in file:
-#             train_cfg.append(os.path.join(path_train3, file))
+    ## add clang code
+    path_train3 = 'libraries/data/compiler/imagemagick'
+    files = os.listdir(path_train3)
+    for file in files:
+        if 'merged' in file and 'clang' in file:
+            train_cfg.append(os.path.join(path_train3, file))
         
     
-#     print("Generating training data...")
-#     with open('datasets/train_cfg.jsonl', 'a') as f:
-#         for js in generate_single(train_cfg, 'training', add_compiler_token = False, require_cfg=True):
-#             f.write(json.dumps(js) + '\n')
-#     print("Finish training data generation")
+    print("Generating training data...")
+    with open('datasets/train_cfg.jsonl', 'a') as f:
+        for js in generate_single(train_cfg, 'training', add_compiler_token = False, require_cfg=True):
+            f.write(json.dumps(js) + '\n')
+    print("Finish training data generation")
         
 
 if __name__ == '__main__':

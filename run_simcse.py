@@ -21,7 +21,6 @@ from models.codet5p_models import CodeT5PEncoderForSequenceEmbedding, CodeT5PFor
 from models.bert_models import GraphCodeBERTForSequenceEmbedding
 from models.qwen_models import Qwen2ForSequenceEmbedding, preload_qwen2_from_causal_lm, CustomQwen2ForSequenceEmbedding
 from models.llm2vec import Qwen2MNTPForSequenceEmbedding
-from data_loaders.pos_neg_bin_sim_dataset import pairwise_collate
 from data_loaders.sim_cse import SimCSEDataset, SimCSE_collate
 from layers.loss import SimeCSELoss
 
